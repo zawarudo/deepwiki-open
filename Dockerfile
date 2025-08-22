@@ -83,6 +83,8 @@ if [ -f .env ]; then\n\
 fi\n\
 \n\
 # Check for required environment variables\n\
+printf "OPENAI_API_KEY: $OPENAI_API_KEY\n"\n\
+printf "GOOGLE_API_KEY: $GOOGLE_API_KEY\n"\n\
 if [ -z "$OPENAI_API_KEY" ] || [ -z "$GOOGLE_API_KEY" ]; then\n\
   echo "Warning: OPENAI_API_KEY and/or GOOGLE_API_KEY environment variables are not set."\n\
   echo "These are required for DeepWiki to function properly."\n\

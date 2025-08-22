@@ -194,7 +194,7 @@ export default function ModelSelectionModal({
               <>
                 <div className="my-4 border-t border-[var(--border-color)]/30"></div>
                 <TokenInput
-                  selectedPlatform={localSelectedPlatform}
+                  selectedPlatform={localSelectedPlatform as 'github' | 'gitlab' | 'bitbucket' | 'codeberg'}
                   setSelectedPlatform={setLocalSelectedPlatform}
                   accessToken={localAccessToken}
                   setAccessToken={setLocalAccessToken}

@@ -1,0 +1,38 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sh -c "python -m api.main --port ${PORT:-8001}"
+    environment:
+      - NODE_ENV=development
+      - PORT=${PORT:-8001}
+      - SERVER_BASE_URL=http://0.0.0.0:${PORT:-8001}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FILE_PATH=${LOG_FILE_PATH:-api/logs/application.log}
+    env_file:
+      - .env
+    volumes:
+      - ./api:/app/api
+      - ./api/logs:/app/api/logs
+      - ~/.adalflow:/root/.adalflow
+    ports:
+      - "${PORT:-8001}:${PORT:-8001}"
+
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci --legacy-peer-deps && npm run dev -- --port 3000 --hostname 0.0.0.0"
+    environment:
+      - NODE_ENV=development
+      - SERVER_BASE_URL=http://api:${PORT:-8001}
+      - PYTHON_BACKEND_HOST=http://api:${PORT:-8001}
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+    ports:
+      - "9001:3000"
+    depends_on:
+      - api
+

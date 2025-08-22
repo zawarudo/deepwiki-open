@@ -198,7 +198,9 @@ export default function RepoWikiPage() {
       ? 'gitlab'
       : repoUrl?.includes('github.com')
         ? 'github'
-        : searchParams.get('type') || 'github';
+        : repoUrl?.includes('codeberg.org')
+          ? 'codeberg'
+          : searchParams.get('type') || 'github';
 
   // Import language context for translations
   const { messages } = useLanguage();

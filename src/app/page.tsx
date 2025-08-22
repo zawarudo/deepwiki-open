@@ -212,6 +212,8 @@ export default function Home() {
         type = 'gitlab';
       } else if (domain?.includes('bitbucket.org') || domain?.includes('bitbucket.')) {
         type = 'bitbucket';
+      } else if (domain?.includes('codeberg.org')) {
+        type = 'codeberg';
       } else {
         type = 'web'; // fallback for other git hosting services
       }
@@ -348,8 +350,8 @@ export default function Home() {
     if (accessToken) {
       params.append('token', accessToken);
     }
-    // Always include the type parameter
-    params.append('type', (type == 'local' ? type : selectedPlatform) || 'github');
+    // Always include the type parameter (prefer parsed type from URL when available)
+    params.append('type', type || 'github');
     // Add local path if it exists
     if (localPath) {
       params.append('local_path', encodeURIComponent(localPath));

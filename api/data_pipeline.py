@@ -648,6 +648,87 @@ def get_bitbucket_file_content(repo_url: str, file_path: str, access_token: str 
         raise ValueError(f"Failed to get file content: {str(e)}")
 
 
+def get_codeberg_file_content(repo_url: str, file_path: str, access_token: str = None) -> str:
+    """
+    Retrieves the content of a file from a Codeberg repository using the Gitea API.
+
+    Codeberg runs Gitea, so its API follows the Gitea conventions:
+    - Get repository:   GET /api/v1/repos/{owner}/{repo}
+    - Get file content: GET /api/v1/repos/{owner}/{repo}/contents/{filepath}?ref={branch}
+
+    For public repositories, authentication is not required.
+
+    Args:
+        repo_url (str): The URL of the Codeberg repository (e.g., "https://codeberg.org/owner/repo" or .git)
+        file_path (str): The path to the file within the repository
+        access_token (str, optional): API token if needed for private repos
+
+    Returns:
+        str: The content of the file as a string
+    """
+    try:
+        parsed = urlparse(repo_url)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("Not a valid Codeberg repository URL")
+
+        # Accept any Gitea-compatible host, but default branch lookup and API path assume Codeberg
+        api_base = f"{parsed.scheme}://{parsed.netloc}/api/v1"
+
+        # Extract owner and repo
+        parts = parsed.path.strip('/').split('/')
+        if len(parts) < 2:
+            raise ValueError("Invalid Codeberg URL format — expected https://codeberg.org/owner/repo")
+        owner = parts[-2]
+        repo = parts[-1].replace('.git', '')
+
+        # Determine default branch
+        default_branch = 'main'
+        try:
+            repo_info_url = f"{api_base}/repos/{owner}/{repo}"
+            headers = {}
+            if access_token:
+                headers['Authorization'] = f"token {access_token}"
+            resp = requests.get(repo_info_url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                default_branch = data.get('default_branch') or data.get('default_branch_name') or 'main'
+        except Exception as e:
+            logger.warning(f"Error fetching Codeberg repo info: {e}, using 'main' as default branch")
+
+        # File contents endpoint (returns metadata + base64 content similar to GitHub)
+        # GET /api/v1/repos/{owner}/{repo}/contents/{filepath}?ref={branch}
+        contents_url = f"{api_base}/repos/{owner}/{repo}/contents/{file_path}?ref={default_branch}"
+        headers = {}
+        if access_token:
+            headers['Authorization'] = f"token {access_token}"
+        logger.info(f"Fetching file content from Codeberg API: {contents_url}")
+        r = requests.get(contents_url, headers=headers)
+        if r.status_code == 200:
+            try:
+                payload = r.json()
+            except json.JSONDecodeError:
+                raise ValueError("Invalid response from Codeberg API")
+
+            if isinstance(payload, dict) and payload.get('content') and payload.get('encoding') == 'base64':
+                content_base64 = payload['content'].replace('\n', '')
+                return base64.b64decode(content_base64).decode('utf-8')
+            # Some Gitea instances can return raw content if requested differently, handle simple text
+            if isinstance(payload, str):
+                return payload
+            raise ValueError("File content not found in Codeberg API response")
+        elif r.status_code == 404:
+            raise ValueError("File not found on Codeberg. Please check the file path and repository.")
+        elif r.status_code == 401:
+            raise ValueError("Unauthorized access to Codeberg. Please check your access token.")
+        elif r.status_code == 403:
+            raise ValueError("Forbidden access to Codeberg. You might not have permission.")
+        else:
+            r.raise_for_status()
+            return r.text
+
+    except Exception as e:
+        raise ValueError(f"Failed to get file content: {str(e)}")
+
 def get_file_content(repo_url: str, file_path: str, type: str = "github", access_token: str = None) -> str:
     """
     Retrieves the content of a file from a Git repository (GitHub or GitLab).
@@ -669,8 +750,10 @@ def get_file_content(repo_url: str, file_path: str, type: str = "github", access
         return get_gitlab_file_content(repo_url, file_path, access_token)
     elif type == "bitbucket":
         return get_bitbucket_file_content(repo_url, file_path, access_token)
+    elif type == "codeberg" or (repo_url and urlparse(repo_url).netloc.endswith("codeberg.org")):
+        return get_codeberg_file_content(repo_url, file_path, access_token)
     else:
-        raise ValueError("Unsupported repository URL. Only GitHub and GitLab are supported.")
+        raise ValueError("Unsupported repository URL. Only GitHub, GitLab, Bitbucket, and Codeberg are supported.")
 
 class DatabaseManager:
     """
@@ -718,10 +801,11 @@ class DatabaseManager:
         # Extract owner and repo name to create unique identifier
         url_parts = repo_url_or_path.rstrip('/').split('/')
 
-        if repo_type in ["github", "gitlab", "bitbucket"] and len(url_parts) >= 5:
+        if repo_type in ["github", "gitlab", "bitbucket", "codeberg"] and len(url_parts) >= 5:
             # GitHub URL format: https://github.com/owner/repo
             # GitLab URL format: https://gitlab.com/owner/repo or https://gitlab.com/group/subgroup/repo
             # Bitbucket URL format: https://bitbucket.org/owner/repo
+            # Codeberg URL format: https://codeberg.org/owner/repo
             owner = url_parts[-2]
             repo = url_parts[-1].replace(".git", "")
             repo_name = f"{owner}_{repo}"
