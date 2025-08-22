@@ -1,0 +1,70 @@
+meta:
+  title: ""
+  date: "YYYY-MM-DD"
+  feature: ""
+  phase: "Checkpoint Options"
+  owner: ""
+
+system_prompt:
+  role: ""
+  objectives:
+    - ""
+  decision_instructions:
+    evaluation_criteria: [feasibility, risk, observability, user_impact]
+    deliverables:
+      - scope_of_change
+      - rollout_steps
+      - fallback_plan
+      - acceptance_criteria
+      - test_matrix
+      - success_failure_signals
+
+current_state:
+  goals_and_outcomes:
+    - id: 1
+      title: ""
+      what: ""
+      where: ""
+      justification:
+        - ""
+  outstanding_issues:
+    - ""
+
+action_plan:
+  - title: ""
+    details: ""
+    impacted_files:
+      - path: ""
+
+options:
+  - id: "A"
+    name: ""
+    pros:
+      - ""
+    cons:
+      - ""
+    good_when:
+      - ""
+
+recommendation:
+  chosen_options: ["A"]
+  rationale: ""
+  scope_of_change:
+    - ""
+  acceptance_criteria:
+    - ""
+  test_matrix:
+    - ""
+  rollout_steps:
+    - ""
+  success_signals:
+    - ""
+  failure_signals:
+    - ""
+
+next_phase_prompt:
+  role: ""
+  prompt: |-
+    ""
+
+

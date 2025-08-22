@@ -409,6 +409,31 @@ def transform_documents_and_save_to_db(
     db.register_transformer(transformer=data_transformer, key="split_and_embed")
     db.load(documents)
     db.transform(key="split_and_embed")
+    # Post-transform validation: count valid vs empty vectors
+    try:
+        transformed_docs = db.get_transformed_data(key="split_and_embed")
+        valid_count = 0
+        empty_count = 0
+        for i, doc in enumerate(transformed_docs):
+            vec = getattr(doc, "vector", None)
+            size = 0
+            if vec is None:
+                size = 0
+            elif isinstance(vec, list):
+                size = len(vec)
+            elif hasattr(vec, "shape"):
+                size = vec.shape[0] if len(vec.shape) == 1 else vec.shape[-1]
+            elif hasattr(vec, "__len__"):
+                size = len(vec)
+            if size > 0:
+                valid_count += 1
+            else:
+                empty_count += 1
+        logger.info(f"Embedding results after transform: {valid_count} valid, {empty_count} empty")
+        if valid_count == 0:
+            logger.error("All transformed documents have empty embedding vectors")
+    except Exception as e:
+        logger.warning(f"Failed post-transform embedding validation: {e}")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     db.save_state(filepath=db_path)
     return db

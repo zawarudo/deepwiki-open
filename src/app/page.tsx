@@ -212,8 +212,8 @@ export default function Home() {
         type = 'gitlab';
       } else if (domain?.includes('bitbucket.org') || domain?.includes('bitbucket.')) {
         type = 'bitbucket';
-      } else if (domain?.includes('codeberg.org')) {
-        type = 'codeberg';
+      // } else if (domain?.includes('codeberg.org')) {
+      //   type = 'codeberg';
       } else {
         type = 'web'; // fallback for other git hosting services
       }

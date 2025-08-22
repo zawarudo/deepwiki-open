@@ -20,6 +20,12 @@ The user has provided a checkpoint file with a next-phase prompt to follow, read
    - At the end of the checkpoint for this section add `ACTION-PLAN` section with a clear set of high level instructions and TODO's for a developer or researcher to continue based on your agent mode.
    - At the top, create a system prompt based on your agent mode adapted to the next step/phase (pm.txt / qa.txt)
 
+3. Create/Update YAML checkpoint using the template
+   - Use `.ai/thembad/checkpoint/checkpoint.template.yml` as the canonical schema.
+   - Use github markdown as the output format as per the canonical schema.
+   - Output path: `.ai/thembad/checkpoint/<date>-<feature>-checkpoint.md`.
+   - Populate all fields; keep decision branches under `options` and the chosen path under `recommendation`.
+
 ## Key Principles
 - **Create specification-specific documentation** that captures current specification/task phase
 - **Preserve key context** across sessions for complex development workflows

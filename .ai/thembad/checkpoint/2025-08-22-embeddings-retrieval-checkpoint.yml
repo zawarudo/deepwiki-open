@@ -1,0 +1,142 @@
+meta:
+  title: "System Prompt for Next Phase: Checkpoint Options (Embeddings/Retriever)"
+  date: "2025-08-22"
+  feature: "embeddings-retrieval"
+  phase: "Checkpoint Options"
+  owner: ""
+
+system_prompt:
+  role: "You are a product-minded engineering lead facilitating a technical decision checkpoint. Your job is to select one approach (or a hybrid) to resolve empty/mismatched embedding vectors and stabilize retriever creation, then turn that into a concrete, testable task plan with acceptance criteria."
+  objectives:
+    - "Choose a path that restores reliable embeddings generation and FAISS retriever initialization for wiki generation."
+    - "Ensure the solution is observable (clear logs/metrics), predictable (consistent vector sizes), and resilient (handles transient API failures)."
+  decision_instructions:
+    evaluation_criteria: [feasibility, risk, observability, user_impact]
+    deliverables:
+      - scope_of_change
+      - rollout_steps
+      - fallback_plan
+      - acceptance_criteria
+      - test_matrix
+      - success_failure_signals
+
+current_state:
+  goals_and_outcomes:
+    - id: 1
+      title: "Harden embedding client against partial failures"
+      what: "Google embeddings client now retains partial results and records error summaries instead of aborting."
+      where: "api/google_embedding_client.py"
+      justification:
+        - "Previously, any per-item failure could abort a batch, yielding empty vectors downstream."
+        - "Partial progress plus explicit error context improves resilience and debuggability."
+    - id: 2
+      title: "Add post-transform validation/logging for vectors"
+      what: "After split_and_embed, count valid vs empty vectors and flag the all-empty case."
+      where: "api/data_pipeline.py (transform_documents_and_save_to_db)"
+      justification:
+        - "Early detection of zero-valid embeddings surfaces root cause before FAISS creation."
+        - "Aids ops triage with actionable logs."
+  outstanding_issues:
+    - "Clearer fail-fast in RAG.prepare_retriever if all vectors are empty, with guidance."
+    - "Adaptive mitigation: smaller text_splitter.chunk_size on first failure."
+    - "Provider fallback (e.g., OpenAI or DashScope) when Google embeddings return pervasive empties."
+
+action_plan:
+  - title: "Implement fail-fast and guidance"
+    details: "In prepare_retriever, detect zero-valid embeddings from DB result and raise a targeted error with next steps."
+    impacted_files:
+      - path: "api/rag.py"
+  - title: "Add adaptive retries"
+    details: "On first zero-valid event, re-run pipeline with smaller chunk_size and/or reduced chunk_overlap."
+    impacted_files:
+      - path: "api/rag.py"
+      - path: "api/data_pipeline.py"
+  - title: "Optional provider fallback (feature-flagged)"
+    details: "Toggle to switch to OpenAI/DashScope for a retry path."
+    impacted_files:
+      - path: "api/config/embedder.json"
+      - path: "api/config.py"
+  - title: "Telemetry and sampling"
+    details: "Emit sample of offending inputs (length, token count, file path) and provider error summaries."
+    impacted_files:
+      - path: "api/data_pipeline.py"
+      - path: "api/google_embedding_client.py"
+  - title: "Tests"
+    details: "Unit tests for client fallback, pipeline validation, and RAG.prepare_retriever fail-fast; E2E to ensure non-zero valid vectors."
+    impacted_files:
+      - path: "tests/"
+
+options:
+  - id: "A"
+    name: "Fail-fast + guidance only (minimal)"
+    pros:
+      - "Quick to implement"
+      - "Clear operator feedback"
+      - "Low risk"
+    cons:
+      - "Does not auto-recover"
+      - "User must rerun after config tweaks"
+    good_when:
+      - "Failures are rare and due to environment/API quotas"
+  - id: "B"
+    name: "Adaptive chunking retry"
+    pros:
+      - "Automatically mitigates token/size-related failures"
+    cons:
+      - "Longer processing"
+      - "May still fail if provider rejects certain inputs"
+    good_when:
+      - "Empties correlate with large or irregular chunks"
+  - id: "C"
+    name: "Provider fallback (feature flag)"
+    pros:
+      - "Recovers when a single provider is unstable or rate-limited"
+    cons:
+      - "More complexity"
+      - "Credentials required"
+      - "Non-deterministic cross-provider embeddings"
+    good_when:
+      - "Reliability is paramount over strict reproducibility"
+  - id: "D"
+    name: "Hybrid (A + B) [Recommended]"
+    pros:
+      - "Clear operator signal with immediate automated mitigation"
+      - "Balanced complexity"
+    cons:
+      - "Slightly more code surface than A"
+      - "Still no provider failover"
+
+recommendation:
+  chosen_options: ["D"]
+  rationale: "Implement fail-fast guidance and a single adaptive retry pass with smaller chunk_size (config-driven). Defer provider fallback behind a feature flag for later."
+  scope_of_change:
+    - "api/rag.py: fail-fast with actionable error and adaptive retry hook"
+    - "api/data_pipeline.py: expose chunk_size override param and keep validation logs"
+    - "api/config/embedder.json: add adaptive_retry and min_chunk_size fields"
+  acceptance_criteria:
+    - "Preparing retriever on a representative repo yields ≥1 valid vector within a single run (initial or adaptive retry)."
+    - "When all embeddings are empty after retry, the error message lists provider, chunk size used, sample file paths, and next steps."
+    - "Logs include counts of valid vs empty vectors and any provider error summaries."
+  test_matrix:
+    - "Small repo with mixed code/docs → non-zero vectors, no retry"
+    - "Large files exceeding token thresholds → triggers adaptive retry, succeeds"
+    - "Simulated provider errors for a subset of inputs → partial vectors still produce a retriever"
+    - "All-error scenario → fail-fast with clear guidance, no retriever created"
+  rollout_steps:
+    - "Ship fail-fast logic behind a safe rollout"
+    - "Enable adaptive retry via config with conservative defaults"
+    - "Monitor logs/metrics; adjust min_chunk_size as needed"
+    - "Document operator guidance and recovery steps"
+  success_signals:
+    - "Significant reduction in runs ending with zero-valid vectors"
+    - "Stable retriever creation times with predictable vector sizes"
+  failure_signals:
+    - "Persistent zero-valid vectors after retry"
+    - "Increased timeouts or provider errors without clear logs"
+
+next_phase_prompt:
+  role: "Product Management"
+  prompt: |-
+    You are a PM/Tech Lead finalizing the implementation plan for embeddings/retriever stability. Based on the Recommendation, produce a short execution plan (max 8 steps), engineering tasks, and crisp acceptance criteria for release. Ensure the plan includes a config toggle for adaptive retry and covers logs/metrics. Deliverables should be ready for developers to pick up immediately.
+
+

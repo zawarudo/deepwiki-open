@@ -83,6 +83,8 @@ class GoogleEmbeddingClient(ModelClient):
         headers = {"Content-Type": "application/json"}
 
         embeddings: List[Embedding] = []
+        any_errors: bool = False
+        error_messages: List[str] = []
 
         # Use batch endpoint for efficiency
         try:
@@ -109,19 +111,48 @@ class GoogleEmbeddingClient(ModelClient):
                         single_payload = {"model": model, "content": {"parts": [{"text": text}]}}
                         r = requests.post(single_url, json=single_payload, headers=headers, timeout=60)
                         if r.status_code != 200:
-                            return EmbedderOutput(data=[], error=f"Google embeddings error: {r.text}", raw_response=r.text)
-                        d = r.json()
-                        vec = d.get("embedding", {}).get("values", [])
+                            # Do not abort entire operation; record error and append empty embedding placeholder
+                            any_errors = True
+                            try:
+                                error_messages.append(r.text[:200])
+                            except Exception:
+                                error_messages.append(f"status={r.status_code}")
+                            embeddings.append(Embedding(embedding=[], index=start + i))
+                            continue
+                        try:
+                            d = r.json()
+                            vec = d.get("embedding", {}).get("values", [])
+                        except Exception as e:
+                            any_errors = True
+                            error_messages.append(str(e)[:200])
+                            vec = []
                         embeddings.append(Embedding(embedding=vec, index=start + i))
                 else:
                     d = resp.json()
                     # Response shape: { "embeddings": [ { "values": [...] }, ... ] }
                     resp_embs = d.get("embeddings", [])
-                    for i, e in enumerate(resp_embs):
-                        vec = e.get("values", [])
+                    # Ensure we return one embedding per input text in the chunk
+                    if len(resp_embs) != len(chunk):
+                        any_errors = True
+                        log.warning(
+                            f"Embeddings count mismatch: received {len(resp_embs)} for {len(chunk)} inputs"
+                        )
+                    for i in range(len(chunk)):
+                        if i < len(resp_embs):
+                            vec = resp_embs[i].get("values", [])
+                        else:
+                            vec = []
                         embeddings.append(Embedding(embedding=vec, index=start + i))
 
-            return EmbedderOutput(data=embeddings, error=None, raw_response=None)
+            error_summary = None
+            if any_errors:
+                # Summarize errors but still return whatever embeddings we obtained
+                unique_msgs = [m for idx, m in enumerate(error_messages) if m not in error_messages[:idx]]
+                error_summary = (
+                    f"One or more embedding requests failed; partial results returned. "
+                    f"Examples: {', '.join(unique_msgs[:3])}"
+                )
+            return EmbedderOutput(data=embeddings, error=error_summary, raw_response=None)
         except Exception as e:
             log.error(f"Error calling Google embeddings (batch): {e}")
             return EmbedderOutput(data=[], error=str(e), raw_response=None)
