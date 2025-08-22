@@ -352,6 +352,21 @@ def read_all_documents(path: str, is_ollama_embedder: bool = None, excluded_dirs
     logger.info(f"Found {len(documents)} documents")
     return documents
 
+def _get_adaptive_retry_config():
+    """
+    Retrieve adaptive retry configuration from `configs["embedder"]` with safe defaults.
+    """
+    embedder_cfg = configs.get("embedder", {})
+    adaptive = embedder_cfg.get("adaptive_retry", {}) or {}
+    return {
+        "enabled": bool(adaptive.get("enabled", False)),
+        "max_retries": int(adaptive.get("max_retries", 0)),
+        "backoff_factor": float(adaptive.get("backoff_factor", 0.5)),
+        "min_batch_size": int(adaptive.get("min_batch_size", 32)),
+        "min_chunk_size": int(embedder_cfg.get("min_chunk_size", 150)),
+    }
+
+
 def prepare_data_pipeline(is_ollama_embedder: bool = None):
     """
     Creates and returns the data transformation pipeline.
@@ -369,7 +384,9 @@ def prepare_data_pipeline(is_ollama_embedder: bool = None):
     if is_ollama_embedder is None:
         is_ollama_embedder = check_ollama()
 
-    splitter = TextSplitter(**configs["text_splitter"])
+    # Start with configured splitter, we may override chunk_size if adaptive retry kicks in
+    splitter_cfg = dict(configs["text_splitter"]) if "text_splitter" in configs else {}
+    splitter = TextSplitter(**splitter_cfg)
     embedder_config = get_embedder_config()
 
     embedder = get_embedder()
@@ -401,14 +418,94 @@ def transform_documents_and_save_to_db(
         is_ollama_embedder (bool, optional): Whether to use Ollama for embedding.
                                            If None, will be determined from configuration.
     """
-    # Get the data transformer
-    data_transformer = prepare_data_pipeline(is_ollama_embedder)
+    # Prepare pipeline (may be adjusted in adaptive loop)
+    adaptive = _get_adaptive_retry_config()
+    embedder_cfg = get_embedder_config()
+    base_batch_size = embedder_cfg.get("batch_size", 500)
 
-    # Save the documents to a local database
-    db = LocalDB()
-    db.register_transformer(transformer=data_transformer, key="split_and_embed")
-    db.load(documents)
-    db.transform(key="split_and_embed")
+    current_batch_size = base_batch_size
+    current_chunk_size = int(configs.get("text_splitter", {}).get("chunk_size", 350))
+    min_chunk_size = adaptive["min_chunk_size"]
+    min_batch_size = adaptive["min_batch_size"]
+    max_retries = adaptive["max_retries"] if adaptive["enabled"] else 0
+    backoff = adaptive["backoff_factor"]
+
+    attempt = 0
+    last_error: Exception | None = None
+
+    while True:
+        # Build pipeline for this attempt with current sizes
+        if not is_ollama_embedder:
+            # Update splitter and embedder batch size
+            splitter_cfg = dict(configs.get("text_splitter", {}))
+            if current_chunk_size:
+                splitter_cfg["chunk_size"] = current_chunk_size
+            splitter = TextSplitter(**splitter_cfg)
+
+            embedder = get_embedder()
+            embedder_transformer = ToEmbeddings(embedder=embedder, batch_size=current_batch_size)
+            data_transformer = adal.Sequential(splitter, embedder_transformer)
+        else:
+            # Ollama path does not batch; keep default pipeline
+            data_transformer = prepare_data_pipeline(is_ollama_embedder)
+
+        # Attempt transform and persist
+        try:
+            db = LocalDB()
+            db.register_transformer(transformer=data_transformer, key="split_and_embed")
+            db.load(documents)
+            db.transform(key="split_and_embed")
+
+            # Simple success validation: ensure at least one non-empty vector
+            transformed_docs = db.get_transformed_data(key="split_and_embed")
+            has_valid = False
+            for doc in transformed_docs or []:
+                vec = getattr(doc, "vector", None)
+                length = 0
+                if isinstance(vec, list):
+                    length = len(vec)
+                elif hasattr(vec, "shape"):
+                    length = vec.shape[0] if len(vec.shape) == 1 else vec.shape[-1]
+                elif hasattr(vec, "__len__") and vec is not None:
+                    length = len(vec)
+                if length > 0:
+                    has_valid = True
+                    break
+            if not has_valid:
+                raise ValueError("Adaptive retry: all embedding vectors are empty after transform")
+
+            # Success -> save and return
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+            db.save_state(filepath=db_path)
+            return db
+
+        except Exception as e:
+            last_error = e
+            logger.error(f"Transform attempt {attempt + 1} failed: {e}")
+
+            # Stop if adaptive retry is disabled or we've exhausted retries
+            if attempt >= max_retries:
+                break
+
+            attempt += 1
+
+            if not is_ollama_embedder:
+                # Reduce sizes with backoff, respecting mins
+                current_batch_size = max(min_batch_size, int(current_batch_size * backoff))
+                current_chunk_size = max(min_chunk_size, int(current_chunk_size * backoff))
+                logger.warning(
+                    f"Adaptive retry backoff -> batch_size={current_batch_size}, chunk_size={current_chunk_size}"
+                )
+            else:
+                # For Ollama, we cannot change batch size; minimal retry just re-attempts
+                logger.warning("Adaptive retry (ollama): re-attempting without batch adjustments")
+
+            continue
+
+    # If we reach here, adaptive retries failed
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Transform failed unexpectedly without an error")
     # Post-transform validation: count valid vs empty vectors
     try:
         transformed_docs = db.get_transformed_data(key="split_and_embed")
@@ -434,9 +531,8 @@ def transform_documents_and_save_to_db(
             logger.error("All transformed documents have empty embedding vectors")
     except Exception as e:
         logger.warning(f"Failed post-transform embedding validation: {e}")
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    db.save_state(filepath=db_path)
-    return db
+    # Unreachable, kept for structure
+    # return db
 
 def get_github_file_content(repo_url: str, file_path: str, access_token: str = None) -> str:
     """

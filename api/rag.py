@@ -371,10 +371,16 @@ IMPORTANT FORMATTING RULES:
         logger.info(f"Loaded {len(self.transformed_docs)} documents for retrieval")
 
         # Validate and filter embeddings to ensure consistent sizes
+        # Fail-fast: validate and filter embeddings before retriever creation
         self.transformed_docs = self._validate_and_filter_embeddings(self.transformed_docs)
 
         if not self.transformed_docs:
-            raise ValueError("No valid documents with embeddings found. Cannot create retriever.")
+            # Explicit fail-fast with clear guidance
+            raise ValueError(
+                "No valid documents with embeddings found after validation. "
+                "This usually indicates the embedder returned empty vectors or mismatched dimensions. "
+                "Rebuild the database or adjust embedder settings."
+            )
 
         logger.info(f"Using {len(self.transformed_docs)} documents with valid embeddings for retrieval")
 
@@ -389,6 +395,7 @@ IMPORTANT FORMATTING RULES:
             )
             logger.info("FAISS retriever created successfully")
         except Exception as e:
+            # Fail-fast: any inconsistency should abort immediately with diagnostics
             logger.error(f"Error creating FAISS retriever: {str(e)}")
             # Try to provide more specific error information
             if "All embeddings should be of the same size" in str(e):
@@ -423,6 +430,14 @@ IMPORTANT FORMATTING RULES:
             Tuple of (RAGAnswer, retrieved_documents)
         """
         try:
+            # Fail-fast: ensure retriever is initialized
+            if not hasattr(self, 'retriever') or self.retriever is None:
+                raise RuntimeError("Retriever not initialized. Call prepare_retriever() successfully before querying.")
+
+            # Fail-fast: ensure we have valid documents backing the retriever
+            if not getattr(self, 'transformed_docs', None):
+                raise RuntimeError("No transformed documents available for retrieval. Prepare database first.")
+
             retrieved_documents = self.retriever(query)
 
             # Fill in the documents
@@ -434,11 +449,6 @@ IMPORTANT FORMATTING RULES:
             return retrieved_documents
 
         except Exception as e:
-            logger.error(f"Error in RAG call: {str(e)}")
-
-            # Create error response
-            error_response = RAGAnswer(
-                rationale="Error occurred while processing the query.",
-                answer=f"I apologize, but I encountered an error while processing your question. Please try again or rephrase your question."
-            )
-            return error_response, []
+            # Fail-fast: propagate for upstream handling while logging a concise error
+            logger.error(f"Error in RAG call (fail-fast): {str(e)}")
+            raise
