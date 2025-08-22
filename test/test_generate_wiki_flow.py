@@ -1,6 +1,10 @@
 import types
 import pytest
+import os
 from fastapi.testclient import TestClient
+
+# Disable file logging for tests to avoid permission issues
+os.environ["DISABLE_FILE_LOGGING"] = "1"
 
 
 @pytest.fixture()
@@ -12,6 +16,8 @@ def app_client(monkeypatch):
         def __init__(self, provider="google", model=None, use_s3: bool = False):
             self.provider = provider
             self.model = model
+            # Add memory attribute to match the real RAG class
+            self.memory = FakeMemory()
 
         def prepare_retriever(self, *args, **kwargs):
             return None
@@ -19,6 +25,13 @@ def app_client(monkeypatch):
         def __call__(self, *args, **kwargs):
             # Return None to skip retrieval path
             return None
+
+    class FakeMemory:
+        def add_dialog_turn(self, user_query, assistant_response):
+            pass
+        
+        def __call__(self):
+            return {}
 
     def fake_get_model_config(provider="google", model=None):
         # Minimal model config for Google path

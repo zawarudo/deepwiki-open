@@ -1,0 +1,19 @@
+{
+  "errors": [
+    {
+      "timestamp": "2025-08-23T07:41:54.403049",
+      "error_count": 1,
+      "warning_count": 5,
+      "severity": "medium"
+    }
+  ],
+  "patterns": {
+    "rate_limiting": 1,
+    "memory_pressure": 1,
+    "data_issues": 1,
+    "custom_0": 1,
+    "error_clusters": 1,
+    "trends": 1,
+    "anomalies": 1
+  }
+}

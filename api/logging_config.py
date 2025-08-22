@@ -61,20 +61,29 @@ def setup_logging(format: str = None):
     log_format = format or "%(asctime)s - %(levelname)s - %(name)s - %(filename)s:%(lineno)d - %(message)s"
 
     # Create handlers
-    file_handler = RotatingFileHandler(resolved_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
+    handlers = []
+    
+    # Skip file handler if DISABLE_FILE_LOGGING is set (for tests)
+    if not os.environ.get("DISABLE_FILE_LOGGING"):
+        try:
+            file_handler = RotatingFileHandler(resolved_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
+            formatter = logging.Formatter(log_format)
+            file_handler.setFormatter(formatter)
+            file_handler.addFilter(IgnoreLogChangeDetectedFilter())
+            handlers.append(file_handler)
+        except PermissionError as e:
+            # Log to console that file logging is disabled due to permission error
+            print(f"Warning: Cannot create log file at {resolved_path} due to permission error. File logging disabled.")
+            # Continue without file handler
+    
     console_handler = logging.StreamHandler()
-
-    # Set format for both handlers
     formatter = logging.Formatter(log_format)
-    file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
-
-    # Add filter to suppress "Detected file change" messages
-    file_handler.addFilter(IgnoreLogChangeDetectedFilter())
     console_handler.addFilter(IgnoreLogChangeDetectedFilter())
+    handlers.append(console_handler)
 
     # Apply logging configuration
-    logging.basicConfig(level=log_level, handlers=[file_handler, console_handler], force=True)
+    logging.basicConfig(level=log_level, handlers=handlers, force=True)
 
     # Log configuration info
     logger = logging.getLogger(__name__)

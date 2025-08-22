@@ -1,0 +1,34 @@
+{
+  "check_interval": 30,
+  "log_lines": 500,
+  "report_threshold": 3,
+  "report_cooldown": 300,
+  "docker_compose_file": "docker-compose.dev.yml",
+  "container_name": "api",
+  "early_warning_patterns": [
+    "[Ww]arning.*error",
+    "[Ff]ailed.*retry",
+    "[Tt]imeout",
+    "[Rr]ate.?limit",
+    "[Cc]onnection.?(refused|reset|closed)",
+    "4\\d{2}\\s+(error|Error)",
+    "5\\d{2}\\s+(error|Error)",
+    "[Ee]xception",
+    "[Tt]raceback",
+    "[Mm]emory.*error",
+    "[Dd]atabase.*error",
+    "batch.*error.*400",
+    "unexpected model name format"
+  ],
+  "notification_settings": {
+    "enabled": false,
+    "webhook_url": "",
+    "email": ""
+  },
+  "analysis_settings": {
+    "cluster_threshold": 5,
+    "anomaly_detection": true,
+    "trend_analysis": true,
+    "pattern_matching": true
+  }
+}
