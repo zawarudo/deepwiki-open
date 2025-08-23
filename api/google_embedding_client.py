@@ -1,4 +1,4 @@
-"""Google Embedding ModelClient integration (text-embedding-004)."""
+"""Google Embedding ModelClient integration (embedding-001)."""
 
 import os
 import logging
@@ -22,7 +22,7 @@ class GoogleEmbeddingClient(ModelClient):
     Minimal ModelClient to call Google AI Studio Embeddings API.
 
     - Uses GOOGLE_API_KEY
-    - Default model: text-embedding-004
+    - Default model: embedding-001
     Docs: https://ai.google.dev/gemini-api/docs/embeddings
     """
 
@@ -66,7 +66,7 @@ class GoogleEmbeddingClient(ModelClient):
         else:
             texts = [str(input)]
 
-        model = model_kwargs.get("model", "text-embedding-004")
+        model = model_kwargs.get("model", "embedding-001")
 
         # Google Embeddings expects one input per request. We'll batch in call().
         return {"texts": texts, "model": model}
@@ -77,7 +77,7 @@ class GoogleEmbeddingClient(ModelClient):
 
         api_kwargs = api_kwargs or {}
         texts: List[str] = api_kwargs.get("texts", [])
-        model: str = api_kwargs.get("model", "text-embedding-004")
+        model: str = api_kwargs.get("model", "embedding-001")
 
         api_key = self._get_api_key()
         headers = {"Content-Type": "application/json"}
@@ -107,7 +107,7 @@ class GoogleEmbeddingClient(ModelClient):
                     log.warning(f"Batch embeddings error ({resp.status_code}), falling back to single requests: {resp.text}")
                     for i, text in enumerate(chunk):
                         single_url = f"{self.base_url}/models/{model}:embedContent?key={api_key}"
-                        single_payload = {"model": model, "content": {"parts": [{"text": text}]}}
+                        single_payload = {"model": f"models/{model}", "content": {"parts": [{"text": text}]}}
                         r = requests.post(single_url, json=single_payload, headers=headers, timeout=60)
                         if r.status_code != 200:
                             # Do not abort entire operation; record error and append empty embedding placeholder

@@ -1,9 +1,9 @@
 ---
 name: fix-api-pipeline-errors
-status: backlog
+status: in-progress
 created: 2025-08-23T07:59:26Z
-updated: 2025-08-23T12:27:40Z
-progress: 0%
+updated: 2025-08-23T18:53:26Z
+progress: 30%
 prd: .claude/prds/fix-api-pipeline-errors.md
 github: [Will be updated when synced to GitHub]
 ---
