@@ -92,14 +92,13 @@ class GoogleEmbeddingClient(ModelClient):
                 return EmbedderOutput(data=[], error=None, raw_response=None)
 
             # Chunk to avoid very large payloads
-            chunk_size = 128
+            chunk_size = 100  # Google API limit: max 100 requests per batch
             for start in range(0, len(texts), chunk_size):
                 chunk = texts[start:start + chunk_size]
                 url = f"{self.base_url}/models/{model}:batchEmbedContents?key={api_key}"
                 payload = {
-                    "model": model,
                     "requests": [
-                        {"model": model, "content": {"parts": [{"text": t}]}} for t in chunk
+                        {"model": f"models/{model}", "content": {"parts": [{"text": t}]}} for t in chunk
                     ],
                 }
                 resp = requests.post(url, json=payload, headers=headers, timeout=120)

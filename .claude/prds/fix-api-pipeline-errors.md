@@ -146,10 +146,29 @@ The Google embedding client in our API pipeline consistently fails when processi
 
 ### Measurable Outcomes
 1. **Reduce batch failure rate from 20-30% to under 2%**
-2. **Decrease average processing time by 85%** (from 267s to 40s for failed batches)
+   - Validated by: Running generate_wiki.py 100 times, checking failure logs
+   - Test command: `for i in {1..100}; do python scripts/generate_wiki.py --url <test-repo> && sleep 1; done`
+   - Success metric: e2e_test.sh health score consistently >98
+   
+2. **Decrease average processing time by 85%** (from 267s to 100s for failed batches)
+   - Validated by: Timing tests with known problematic repositories
+   - Test command: `time python scripts/generate_wiki.py --url <large-repo>`
+   - Success metric: 95th percentile under 100 seconds
+   
 3. **Improve successful batch processing rate to 98%+**
+   - Validated by: Unit tests for batch processing logic
+   - Test command: `pytest tests/test_batch_processing.py::test_success_rate`
+   - Success metric: All retry scenarios pass without fallback
+   
 4. **Reduce API costs by 40%** through optimized batching
+   - Validated by: Monitoring API call counts in logs
+   - Test command: `grep "API call" api.log | wc -l` before/after comparison
+   - Success metric: Call count reduction of 40%+ for same workload
+   
 5. **Achieve 99.9% embedding completeness** for processed documents
+   - Validated by: Database query for null embeddings post-processing
+   - Test command: `pytest tests/test_embedding_completeness.py`
+   - Success metric: <0.1% documents with missing embeddings
 
 ### Key Metrics and KPIs
 - **Batch Success Rate**: Percentage of batches processed without fallback
@@ -257,25 +276,68 @@ The following items are explicitly NOT included in this PRD:
 
 ## Implementation Phases
 
-### Phase 1: Immediate Fixes (Week 1)
-- Add request validation and preprocessing
-- Implement basic retry with batch size reduction
-- Enhance error logging and diagnostics
+### Phase 1: Bug Reproduction & Test Development Loop (Week 1)
+- **Step 1: Establish Baseline**
+  - Run `python scripts/generate_wiki.py --url <test-repo> --provider google`
+  - Capture API error logs using `watcher-agents/api-logs/e2e_test.sh`
+  - Document current failure rate and error patterns
+  
+- **Step 2: Create Unit Tests**
+  - Write unit tests for batch validation logic
+  - Test retry mechanism with different batch sizes
+  - Test error parsing and classification
+  - Test fallback to single-request mode
+  
+- **Step 3: Fix-Test Loop**
+  1. Run generate_wiki.py with test repository
+  2. Check logs with e2e_test.sh (health score should be >90)
+  3. Identify specific error pattern
+  4. Write failing unit test for that error
+  5. Implement fix
+  6. Verify unit test passes
+  7. Run generate_wiki.py again
+  8. Repeat until health score reaches target
 
 ### Phase 2: Intelligent Batching (Week 2)
-- Content-aware batch sizing
-- Dynamic batch size optimization
-- Performance metrics collection
+- **Test-Driven Implementation**
+  - Unit test for content size calculation
+  - Unit test for batch grouping algorithm
+  - Unit test for dynamic size adjustment
+  - Integration test with real API calls
+  
+- **Validation Loop**
+  1. Run test suite: `pytest tests/test_batch_processing.py`
+  2. Execute end-to-end test with varied repositories
+  3. Monitor with e2e_test.sh for regression
+  4. Adjust based on performance metrics
 
 ### Phase 3: Resilience Features (Week 3)
-- Circuit breaker implementation
-- Queue management system
-- Comprehensive monitoring dashboard
+- **Circuit Breaker Testing**
+  - Unit test for state transitions (closed → open → half-open)
+  - Unit test for failure threshold detection
+  - Integration test with simulated API failures
+  
+- **Queue Management Testing**
+  - Unit test for queue overflow handling
+  - Unit test for priority ordering
+  - Load test with concurrent requests
+  
+- **Continuous Validation**
+  - Run e2e_test.sh every 2 hours during development
+  - Maintain health score above 95%
+  - Document any new error patterns discovered
 
 ### Phase 4: Testing & Deployment (Week 4)
-- Load testing with various failure scenarios
-- Gradual rollout with feature flags
-- Documentation and team training
+- **Comprehensive Test Suite**
+  - Run all unit tests: `pytest tests/ -v`
+  - Execute stress test: 100 concurrent wiki generations
+  - Validate with different repository types and sizes
+  
+- **Production Readiness**
+  - Feature flag implementation with gradual rollout
+  - Monitor error rates in staging environment
+  - A/B test against current implementation
+  - Final validation: 99%+ health score for 24 hours
 
 ## Appendix
 
@@ -286,3 +348,53 @@ The following items are explicitly NOT included in this PRD:
 - Error code: HTTP 400 (Bad Request)
 - Fallback mechanism: Single request per document
 - Code location: `api/google_embedding_client.py:108`
+
+### Test Development Resources
+
+#### Testing Scripts
+1. **e2e_test.sh** - Primary test validation tool
+   - Location: `watcher-agents/api-logs/e2e_test.sh`
+   - Usage: `./e2e_test.sh` (returns health score 0-100)
+   - Exit codes: 0 (healthy), 1 (warning), 2 (critical)
+   
+2. **generate_wiki.py** - End-to-end test driver
+   - Location: `scripts/generate_wiki.py`
+   - Test command: `python scripts/generate_wiki.py --url https://github.com/test/repo --provider google`
+   - Monitor output for HTTP 400 errors
+   
+3. **simple_monitor.sh** - Detailed error reporting
+   - Location: `watcher-agents/api-logs/simple_monitor.sh`
+   - Usage: `./simple_monitor.sh report` (generates markdown report)
+   
+#### Unit Test Structure
+```python
+# tests/test_batch_processing.py
+class TestBatchProcessing:
+    def test_batch_size_reduction_on_failure(self):
+        """Test automatic batch size reduction from 128 → 64 → 32 → 16 → 8"""
+        pass
+    
+    def test_content_validation_before_submission(self):
+        """Test that invalid content is caught before API call"""
+        pass
+    
+    def test_retry_with_exponential_backoff(self):
+        """Test retry delays: 1s, 2s, 4s, 8s, 16s"""
+        pass
+    
+    def test_error_parsing_and_classification(self):
+        """Test correct identification of error types from API response"""
+        pass
+    
+    def test_fallback_to_single_requests(self):
+        """Test graceful degradation when all batch sizes fail"""
+        pass
+```
+
+#### Test Repositories for Validation
+- Codeberg repo (Target repo for next steps): `https://codeberg.org/maxcodefaster/teammind`
+- Small repo (< 50 files): `https://github.com/sindresorhus/is-docker`
+- Medium repo (100-500 files): `https://github.com/fastapi/fastapi`
+<!-- Not in scope - Large repo (1000+ files): `https://github.com/facebook/react` -->
+<!-- Not in scope - Special characters test: TODO the user will find this -->
+<!-- Not in scope - Large file test: TODO the user will find this -->
