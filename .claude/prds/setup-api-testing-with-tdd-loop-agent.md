@@ -1,5 +1,19 @@
 # API Testing Pipeline with TDD Loop PRD
 
+## WHY
+We have an API bug in api.rag, however we want to fix the source of the problem not the symptom.
+We need to introduce a testing pipeline that tests key points of the earlier steps of this pipeline.
+We need to introduce a testing framework that we can setup and start with quickly, but meets standard testing framework requirements.
+
+### Bug needed to identify root cause
+Enough to identify and fix the embedding pipeline bug in rag.py
+--- Key error we should work from first principles of the pipeline to arrive at a clear solution.
+2025-08-23 23:12:31 api-1  | 2025-08-23 15:12:31,569 - WARNING - api.rag - rag.py:285 - Document 921 has empty embedding vector, skipping
+2025-08-23 23:12:31 api-1  | 2025-08-23 15:12:31,569 - WARNING - api.rag - rag.py:285 - Document 922 has empty embedding vector, skipping
+2025-08-23 23:12:31 api-1  | 2025-08-23 15:12:31,569 - ERROR - api.rag - rag.py:295 - No valid embeddings found in any documents
+2025-08-23 23:12:31 api-1  | 2025-08-23 15:12:31,569 - ERROR - api.websocket_wiki - websocket_wiki.py:102 - No valid embeddings found: No valid documents with embeddings found after validation. This usually indicates the embedder returned empty vectors or mismatched dimensions. Rebuild the database or adjust embedder settings.
+---
+
 ## Executive Summary
 This PRD outlines the implementation of a best-practice API testing pipeline with Test-Driven Development (TDD) focus, specifically designed for our RAG-based API system. The solution will enable systematic testing of the entire pipeline, from git repository ingestion to embedding generation and storage.
 
