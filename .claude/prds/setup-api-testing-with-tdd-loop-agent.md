@@ -1,3 +1,10 @@
+---
+name: setup-api-testing-with-tdd-loop-agent
+status: draft
+created: 2025-08-23T15:00:00Z
+updated: 2025-08-23T16:33:46Z
+---
+
 # API Testing Pipeline with TDD Loop PRD
 
 ## WHY
@@ -15,170 +22,128 @@ Enough to identify and fix the embedding pipeline bug in rag.py
 ---
 
 ## Executive Summary
-This PRD outlines the implementation of a best-practice API testing pipeline with Test-Driven Development (TDD) focus, specifically designed for our RAG-based API system. The solution will enable systematic testing of the entire pipeline, from git repository ingestion to embedding generation and storage.
+**PRAGMATIC APPROACH**: Fix the critical embedding bug first, then implement minimal testing infrastructure to prevent regression. This PRD focuses on delivering immediate value with the smallest possible implementation that solves the actual problem.
 
 ## Goals and Objectives
-1. Establish a TDD-focused testing pipeline for the API
-2. Implement comprehensive test coverage across all pipeline stages
-3. Enable AI-driven test automation and maintenance
-4. Create clear documentation for both human and AI test execution
+1. **Fix the embedding bug** causing empty vectors in rag.py
+2. **Prevent regression** with minimal test coverage
+3. **Enable CI/CD testing** to catch bugs before production
+4. **Keep it simple** - no over-engineering
 
-## Technical Requirements
+## Technical Requirements (Simplified)
 
-### 1. Testing Framework Structure
+### 1. Minimal Testing Structure
 ```
-API Testing Pipeline
-├── Unit Tests
-│   ├── Repository Processing
-│   ├── Content Extraction
-│   ├── Embedding Generation
-│   └── Vector Storage
-├── Integration Tests
-│   ├── Pipeline Flow
-│   └── Error Handling
-└── System Tests
-    ├── Performance
-    └── End-to-End
+tests/
+├── test_embedding_pipeline.py  # Focus on the bug
+├── test_rag.py                 # Test empty vector handling
+└── conftest.py                 # Basic pytest setup
 ```
 
-### 2. Test Data Management
-- Version-controlled test data repository
-- Automated test data capture points
-- Synthetic data generation capabilities
-- Data sanitization and validation
-
-### 3. Hypothetical Core Testing Components
+### 2. Core Testing Focus
 ```python
-# Key Testing Areas
-class TestComponents:
-    def test_repository_processing(self):
-        """Git repository ingestion and processing"""
-        
-    def test_content_extraction(self):
-        """Content parsing and preparation"""
-        
-    def test_embedding_generation(self):
-        """Vector embedding creation and validation"""
-        
-    def test_vector_storage(self):
-        """Vector database operations"""
+# Only test what's broken
+def test_empty_embedding_handling():
+    """Verify system handles empty embeddings gracefully"""
+    
+def test_embedding_generation():
+    """Ensure embeddings are actually generated"""
+    
+def test_vector_validation():
+    """Check dimensions before FAISS operations"""
 ```
 
-### 4. Error Handling Coverage
-- Empty embedding detection and handling
-- Invalid content processing
-- Service integration failures
-- Resource cleanup and recovery
+### 3. No Complex Infrastructure
+- Use real API calls (no mocks)
+- Simple test data (3-5 sample documents)
+- Direct testing of actual bug scenario
+- Focus on rag.py lines 285-295
 
-## Implementation Strategy
+## Implementation Strategy (Pragmatic)
 
-### 1. TDD Implementation Loop
-1. Write failing test for specific pipeline component
-2. Implement minimal passing solution
-3. Refactor and optimize
-4. Document test cases and patterns
+### Phase 1: Fix the Bug (Day 1)
+1. Debug why embeddings are empty
+2. Add validation before FAISS operations
+3. Write test to verify fix
 
-### 2. Test Data Pipeline
-```
-Git Repo → File Processing → Content Extraction → Embedding Generation
-     ↓            ↓                  ↓                    ↓
-Capture Points for Test Data Generation and Validation
-```
+### Phase 2: Basic Testing (Day 2-3)
+1. Install pytest and pytest-asyncio
+2. Create 5-10 tests for embedding pipeline
+3. Test the specific bug scenario
 
-### 3. AI Integration Points
-- Test case generation
-- Result analysis
-- Coverage optimization
-- Documentation generation
+### Phase 3: CI/CD Integration (Day 4)
+1. Add test step to GitHub Actions
+2. Run tests before Docker build
+3. Block deployment on test failure
 
 ## Testing Framework Selection
 
-### Primary Framework: Porposal 1: pytest
-1. Advantages:
-   - Rich fixture system
-   - Parallel execution support
-   - Extensive plugin ecosystem
-   - Clear test organization
-
-2. Key Extensions:
-   - pytest-asyncio for async testing
-   - pytest-xdist for parallel execution
-   - pytest-cov for coverage reporting
-   - pytest-mock for dependency mocking
-
-## Risk Mitigation
-
-### 1. Technical Risks
-- Test data volatility
-- Service reliability
-- Resource management
-- Performance impact
-
-### 2. Mitigation Strategies
-- Versioned test data
-- Service mocking
-- Resource isolation
-- Performance benchmarking
-
-## AI Documentation
-
-### 1. Test Execution Commands
+### Framework: pytest (minimal setup)
 ```bash
-# Run all tests
-pytest tests/
+# Only what we need
+pip install pytest pytest-asyncio
 
-# Run specific test categories
-pytest tests/unit/
-pytest tests/integration/
-pytest tests/system/
-
-# Run with coverage
-pytest --cov=api tests/
+# No complex plugins needed initially
 ```
 
-### 2. AI Integration Points
-```python
-# AI Test Generation
-def generate_test_cases():
-    """Generate test cases for specific components"""
+## Risk Mitigation (Minimal)
 
-# AI Result Analysis
-def analyze_test_results():
-    """Analyze test execution results"""
-```
+### Risks & Simple Solutions
+- **Risk**: Over-engineering the solution
+  - **Solution**: Stay focused on the bug, add only essential tests
+- **Risk**: Complex test infrastructure delays fix
+  - **Solution**: Fix bug first, then add tests
+- **Risk**: Tests become flaky
+  - **Solution**: Use real services, no complex mocks
 
-## Implementation Phases
+## Task List (Lean & Pragmatic)
 
-### Phase 1: Core Framework
-- Set up pytest infrastructure
-- Implement basic test structure
-- Create initial test data capture
+### Task 001: Fix Empty Embedding Bug (Priority: Critical)
+- Debug why embeddings are empty in rag.py
+- Add validation before FAISS operations
+- Implement proper error handling
+- **Deliverable**: No more crashes from empty vectors
 
-### Phase 2: Advanced Features
-- Add parallel execution
-- Implement AI integration
-- Enhance error handling
+### Task 002: Create Minimal Test Suite (Priority: High)
+- Write 3-5 tests for embedding generation
+- Test empty vector scenario explicitly
+- Use real API calls (no mocks)
+- **Deliverable**: Tests that catch the bug
 
-### Phase 3: Optimization
-- Performance tuning
-- Coverage optimization
-- Documentation refinement
+### Task 003: Setup pytest Infrastructure (Priority: High)
+- Add pytest, pytest-asyncio to requirements.txt
+- Configure pytest.ini
+- Create test directory structure
+- **Deliverable**: `pytest` command works
 
-## Success Metrics
-1. Test Coverage Requirements: Enough to identify and fix the embedding pipeline bug in rag.py
---- Key error we should work from first principles of the pipeline to arrive at a clear solution.
-2025-08-23 23:12:31 api-1  | 2025-08-23 15:12:31,569 - WARNING - api.rag - rag.py:285 - Document 921 has empty embedding vector, skipping
-2025-08-23 23:12:31 api-1  | 2025-08-23 15:12:31,569 - WARNING - api.rag - rag.py:285 - Document 922 has empty embedding vector, skipping
-2025-08-23 23:12:31 api-1  | 2025-08-23 15:12:31,569 - ERROR - api.rag - rag.py:295 - No valid embeddings found in any documents
-2025-08-23 23:12:31 api-1  | 2025-08-23 15:12:31,569 - ERROR - api.websocket_wiki - websocket_wiki.py:102 - No valid embeddings found: No valid documents with embeddings found after validation. This usually indicates the embedder returned empty vectors or mismatched dimensions. Rebuild the database or adjust embedder settings.
----
-2. Execution Time: <5 minutes for full suite
-3. Reliability: <1% flaky tests
-4. Documentation: 100% AI-executable commands
+### Task 004: Test Critical Path (Priority: Medium)
+- Test: Git repo → Content → Embeddings → Storage
+- Focus on happy path + bug scenario
+- **Deliverable**: Core pipeline has test coverage
+
+### Task 005: Add CI/CD Testing (Priority: Medium)
+- Add test step to GitHub Actions
+- Fail deployment if tests fail
+- **Deliverable**: Automated testing on every push
+
+## Success Metrics (Simplified)
+1. **Bug Fixed**: No more empty embedding errors
+2. **Tests Pass**: 5-10 tests covering the bug scenario
+3. **CI/CD Works**: Tests run automatically on push
+4. **Time to Complete**: 1 week maximum
+
+## What We're NOT Doing
+- ❌ Complex test data management
+- ❌ AI-driven test generation  
+- ❌ Parallel test execution
+- ❌ Performance benchmarking
+- ❌ 100% coverage targets
+- ❌ Service mocking layers
+- ❌ Multiple testing frameworks
 
 ## Next Steps
-1. Set up pytest infrastructure
-2. Create initial test data repository
-3. Implement first test cases
-4. Document test patterns
-5. Enable AI test generation by integrating with .claude/
+1. Fix the embedding bug in rag.py
+2. Add pytest to requirements.txt
+3. Write 5 focused tests
+4. Add test step to GitHub Actions
+5. Ship it
