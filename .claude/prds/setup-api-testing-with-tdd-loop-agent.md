@@ -2,7 +2,7 @@
 name: setup-api-testing-with-tdd-loop-agent
 status: draft
 created: 2025-08-23T15:00:00Z
-updated: 2025-08-23T16:33:46Z
+updated: 2025-08-23T16:37:56Z
 ---
 
 # API Testing Pipeline with TDD Loop PRD
@@ -22,59 +22,64 @@ Enough to identify and fix the embedding pipeline bug in rag.py
 ---
 
 ## Executive Summary
-**PRAGMATIC APPROACH**: Fix the critical embedding bug first, then implement minimal testing infrastructure to prevent regression. This PRD focuses on delivering immediate value with the smallest possible implementation that solves the actual problem.
+**TEST-DRIVEN APPROACH**: Write tests FIRST to identify the root cause of empty embeddings, then fix the code to make tests pass. This PRD prioritizes parallel test creation and research to understand the pipeline failure points BEFORE touching any production code.
 
 ## Goals and Objectives
-1. **Fix the embedding bug** causing empty vectors in rag.py
-2. **Prevent regression** with minimal test coverage
-3. **Enable CI/CD testing** to catch bugs before production
-4. **Keep it simple** - no over-engineering
+1. **Write tests first** to reproduce the empty embedding bug
+2. **Identify root cause** through systematic test-driven investigation
+3. **Fix only what tests prove is broken** - no speculative fixes
+4. **Parallelize test creation** to speed up root cause analysis
 
-## Technical Requirements (Simplified)
+## Technical Requirements (TDD-First)
 
-### 1. Minimal Testing Structure
+### 1. Test Structure for Pipeline Investigation
 ```
 tests/
-├── test_embedding_pipeline.py  # Focus on the bug
-├── test_rag.py                 # Test empty vector handling
-└── conftest.py                 # Basic pytest setup
+├── test_1_git_ingestion.py     # Test: Can we read repo files?
+├── test_2_content_extraction.py # Test: Is content extracted correctly?
+├── test_3_embedding_client.py   # Test: Are embeddings generated?
+├── test_4_vector_validation.py  # Test: Are vectors valid dimensions?
+├── test_5_rag_storage.py       # Test: Does FAISS accept vectors?
+└── conftest.py                  # Shared test fixtures
 ```
 
-### 2. Core Testing Focus
+### 2. Parallel Test Creation Strategy
 ```python
-# Only test what's broken
-def test_empty_embedding_handling():
-    """Verify system handles empty embeddings gracefully"""
-    
-def test_embedding_generation():
-    """Ensure embeddings are actually generated"""
-    
-def test_vector_validation():
-    """Check dimensions before FAISS operations"""
+# Each test investigates a pipeline stage INDEPENDENTLY
+# Run all in parallel to quickly identify failure point
+
+def test_pipeline_stage_X():
+    """Test specific stage to isolate where empty vectors originate"""
+    # RED: Write failing test that expects correct behavior
+    # Investigation: Run test to see actual vs expected
+    # Root Cause: Document why this stage fails
 ```
 
-### 3. No Complex Infrastructure
-- Use real API calls (no mocks)
-- Simple test data (3-5 sample documents)
-- Direct testing of actual bug scenario
-- Focus on rag.py lines 285-295
+### 3. Test-Driven Investigation Process
+1. **Write tests for each pipeline stage** (before looking at code)
+2. **Run tests in parallel** to see where pipeline breaks
+3. **Document failures** to understand root cause
+4. **Only then fix code** to make tests pass
 
-## Implementation Strategy (Pragmatic)
+## Implementation Strategy (TDD-First)
 
-### Phase 1: Fix the Bug (Day 1)
-1. Debug why embeddings are empty
-2. Add validation before FAISS operations
-3. Write test to verify fix
-
-### Phase 2: Basic Testing (Day 2-3)
+### Phase 1: Setup & Parallel Test Creation (Hour 1-2)
 1. Install pytest and pytest-asyncio
-2. Create 5-10 tests for embedding pipeline
-3. Test the specific bug scenario
+2. Launch parallel agents to create tests for each pipeline stage
+3. Each agent investigates one stage independently
+4. No code fixes yet - only test creation
 
-### Phase 3: CI/CD Integration (Day 4)
-1. Add test step to GitHub Actions
-2. Run tests before Docker build
-3. Block deployment on test failure
+### Phase 2: Run Tests & Identify Root Cause (Hour 3-4)
+1. Run all tests to see failure patterns
+2. Analyze which pipeline stage(s) produce empty vectors
+3. Document exact failure points with test evidence
+4. Create hypothesis for root cause
+
+### Phase 3: Fix Code to Pass Tests (Hour 5-6)
+1. Fix ONLY the code that tests prove is broken
+2. Re-run tests to verify fixes
+3. Add regression tests for edge cases
+4. Commit when all tests green
 
 ## Testing Framework Selection
 
@@ -96,41 +101,70 @@ pip install pytest pytest-asyncio
 - **Risk**: Tests become flaky
   - **Solution**: Use real services, no complex mocks
 
-## Task List (Lean & Pragmatic)
+## Task List (TDD-First, Parallelizable)
 
-### Task 001: Fix Empty Embedding Bug (Priority: Critical)
-- Debug why embeddings are empty in rag.py
-- Add validation before FAISS operations
-- Implement proper error handling
-- **Deliverable**: No more crashes from empty vectors
-
-### Task 002: Create Minimal Test Suite (Priority: High)
-- Write 3-5 tests for embedding generation
-- Test empty vector scenario explicitly
-- Use real API calls (no mocks)
-- **Deliverable**: Tests that catch the bug
-
-### Task 003: Setup pytest Infrastructure (Priority: High)
+### Task 001: Setup pytest Infrastructure (Priority: Critical, 30 min)
 - Add pytest, pytest-asyncio to requirements.txt
-- Configure pytest.ini
+- Configure pytest.ini for parallel execution
 - Create test directory structure
-- **Deliverable**: `pytest` command works
+- **Deliverable**: `pytest` command ready
 
-### Task 004: Test Critical Path (Priority: Medium)
-- Test: Git repo → Content → Embeddings → Storage
-- Focus on happy path + bug scenario
-- **Deliverable**: Core pipeline has test coverage
+### Parallel Test Creation Tasks (Can run simultaneously):
 
-### Task 005: Add CI/CD Testing (Priority: Medium)
+### Task 002: Test Git Ingestion Stage (Priority: Critical)
+- Write test for repository file reading
+- Test with sample repo structure
+- Verify files are accessible
+- **Deliverable**: test_1_git_ingestion.py
+
+### Task 003: Test Content Extraction Stage (Priority: Critical)
+- Write test for content parsing
+- Test with various file types
+- Verify content is extracted
+- **Deliverable**: test_2_content_extraction.py
+
+### Task 004: Test Embedding Client Stage (Priority: Critical)
+- Write test for embedding generation
+- Test with sample documents
+- Verify vectors are created with correct dimensions
+- **Deliverable**: test_3_embedding_client.py
+
+### Task 005: Test Vector Validation Stage (Priority: Critical)
+- Write test for vector dimension checking
+- Test empty vector handling
+- Verify validation catches bad vectors
+- **Deliverable**: test_4_vector_validation.py
+
+### Task 006: Test RAG Storage Stage (Priority: Critical)
+- Write test for FAISS operations
+- Test with valid and invalid vectors
+- Verify storage handles edge cases
+- **Deliverable**: test_5_rag_storage.py
+
+### Sequential Tasks (After parallel tests complete):
+
+### Task 007: Run All Tests & Analyze Failures (Priority: Critical)
+- Execute full test suite
+- Document which stages fail
+- Identify root cause from test results
+- **Deliverable**: Root cause analysis document
+
+### Task 008: Fix Code Based on Test Results (Priority: Critical)
+- Fix ONLY what tests identify as broken
+- No speculative changes
+- Re-run tests to verify
+- **Deliverable**: All tests passing
+
+### Task 009: Add CI/CD Testing (Priority: High)
 - Add test step to GitHub Actions
-- Fail deployment if tests fail
-- **Deliverable**: Automated testing on every push
+- Run tests before Docker build
+- **Deliverable**: Automated testing on push
 
-## Success Metrics (Simplified)
-1. **Bug Fixed**: No more empty embedding errors
-2. **Tests Pass**: 5-10 tests covering the bug scenario
-3. **CI/CD Works**: Tests run automatically on push
-4. **Time to Complete**: 1 week maximum
+## Success Metrics (TDD-Focused)
+1. **Tests Written First**: All tests created before code changes
+2. **Root Cause Identified**: Tests pinpoint exact failure stage
+3. **Bug Fixed**: Tests pass after minimal code changes
+4. **Time to Complete**: 6 hours with parallel execution
 
 ## What We're NOT Doing
 - ❌ Complex test data management
@@ -141,9 +175,9 @@ pip install pytest pytest-asyncio
 - ❌ Service mocking layers
 - ❌ Multiple testing frameworks
 
-## Next Steps
-1. Fix the embedding bug in rag.py
-2. Add pytest to requirements.txt
-3. Write 5 focused tests
-4. Add test step to GitHub Actions
-5. Ship it
+## Next Steps (TDD Workflow)
+1. Setup pytest infrastructure (30 min)
+2. Launch 5 parallel agents to create pipeline tests (1 hour)
+3. Run all tests to identify failure points (30 min)
+4. Fix only what tests prove is broken (1 hour)
+5. Ship it with confidence
