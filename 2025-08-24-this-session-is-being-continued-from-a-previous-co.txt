@@ -1,0 +1,21 @@
+╭───────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Code!                         │
+│                                                   │
+│   /help for help, /status for your current setup  │
+│                                                   │
+│   cwd: /home/ubuwarudo/Personal/deepwiki-open     │
+╰───────────────────────────────────────────────────╯
+● Compact summary (ctrl+r to expand)
+  ⎿  Referenced file api/tests/test_vector_validation.py
+  ⎿  Read api/tests/test_setup.py (166 lines)
+  ⎿  Referenced file api/tests/test_rag_pipeline.py
+  ⎿  Read api/tests/test_fixtures_validation.py (375 lines)
+  ⎿  Referenced file api/tests/test_embedding_client.py
+
+> /compact Prioritize data that helps you explain to me step by step test by test, checking and showing me where in the output each tests pass or fail. See these commands    # Run 
+specific test suites
+  python3 -m pytest api/tests/test_setup.py -v           # Basic tests (should pass)
+  python3 -m pytest api/tests/test_vector_validation.py  # Vector validation
+  python3 -m pytest api/tests/test_embedding_client.py   # Embedding tests
+  ⎿  Compacted. ctrl+r to see full summary
+
