@@ -2,7 +2,7 @@
 name: setup-api-testing-with-tdd-loop-agent
 status: draft
 created: 2025-08-23T15:00:00Z
-updated: 2025-08-23T16:37:56Z
+updated: 2025-08-23T16:41:51Z
 ---
 
 # API Testing Pipeline with TDD Loop PRD
@@ -28,7 +28,7 @@ Enough to identify and fix the embedding pipeline bug in rag.py
 1. **Write tests first** to reproduce the empty embedding bug
 2. **Identify root cause** through systematic test-driven investigation
 3. **Fix only what tests prove is broken** - no speculative fixes
-4. **Parallelize test creation** to speed up root cause analysis
+4. **Run tests locally** with Docker rebuild for verification
 
 ## Technical Requirements (TDD-First)
 
@@ -57,29 +57,37 @@ def test_pipeline_stage_X():
 
 ### 3. Test-Driven Investigation Process
 1. **Write tests for each pipeline stage** (before looking at code)
-2. **Run tests in parallel** to see where pipeline breaks
+1.b **Consider if the output looks correct or possibly unexpected** (Stop and ask the user if action is needed)
+2. **Run tests locally** to see where pipeline breaks
 3. **Document failures** to understand root cause
-4. **Only then fix code** to make tests pass
+4. **Fix code** to make tests pass
+5. **Rebuild Docker** and verify in container environment
 
-## Implementation Strategy (TDD-First)
+## Implementation Strategy (TDD-First with Local Docker)
 
-### Phase 1: Setup & Parallel Test Creation (Hour 1-2)
-1. Install pytest and pytest-asyncio
-2. Launch parallel agents to create tests for each pipeline stage
-3. Each agent investigates one stage independently
-4. No code fixes yet - only test creation
+### Phase 1: Setup & Test Creation (Hour 1)
+1. Install pytest and pytest-asyncio locally
+2. Create test structure and fixtures
+3. Prepare Docker environment for testing
 
-### Phase 2: Run Tests & Identify Root Cause (Hour 3-4)
-1. Run all tests to see failure patterns
-2. Analyze which pipeline stage(s) produce empty vectors
-3. Document exact failure points with test evidence
-4. Create hypothesis for root cause
+### Phase 2: Parallel Investigation (Hour 2-3)
+1. Launch parallel agents to create/run tests for:
+   - Embedding client functionality
+   - Vector validation logic
+   - RAG storage operations
+2. Each agent tests their component in isolation
+3. Gather results to identify failure points
 
-### Phase 3: Fix Code to Pass Tests (Hour 5-6)
+### Phase 3: Fix & Verify Locally (Hour 4-5)
 1. Fix ONLY the code that tests prove is broken
-2. Re-run tests to verify fixes
-3. Add regression tests for edge cases
-4. Commit when all tests green
+2. Run `pytest` locally to verify fixes
+3. Rebuild Docker: `docker-compose build api`
+4. Test in container: `docker-compose run api pytest`
+
+### Phase 4: Integration Verification (Hour 6)
+1. Run full pipeline test in Docker
+2. Verify empty embedding bug is fixed
+3. Document solution and test coverage
 
 ## Testing Framework Selection
 
@@ -101,83 +109,83 @@ pip install pytest pytest-asyncio
 - **Risk**: Tests become flaky
   - **Solution**: Use real services, no complex mocks
 
-## Task List (TDD-First, Parallelizable)
+## Task List (Optimized for Parallel Execution)
 
-### Task 001: Setup pytest Infrastructure (Priority: Critical, 30 min)
+### Setup Task (Sequential):
+
+### Task 001: Setup Testing Infrastructure (Priority: Critical, 30 min)
 - Add pytest, pytest-asyncio to requirements.txt
-- Configure pytest.ini for parallel execution
+- Configure pytest.ini for API testing
 - Create test directory structure
-- **Deliverable**: `pytest` command ready
+- Setup Docker test commands
+- **Deliverable**: Testing environment ready
 
-### Parallel Test Creation Tasks (Can run simultaneously):
+### Parallel Investigation Tasks (3 agents working simultaneously):
 
-### Task 002: Test Git Ingestion Stage (Priority: Critical)
-- Write test for repository file reading
-- Test with sample repo structure
-- Verify files are accessible
-- **Deliverable**: test_1_git_ingestion.py
+### Task 002: Test & Debug Embedding Client (Priority: Critical)
+**Agent 1 Focus**: Where do empty vectors originate?
+- Write tests for google_embedding_client.py
+- Test batch processing with various inputs
+- Test error handling and fallback logic
+- Identify why vectors are empty
+- **Deliverable**: test_embedding_client.py + root cause
 
-### Task 003: Test Content Extraction Stage (Priority: Critical)
-- Write test for content parsing
-- Test with various file types
-- Verify content is extracted
-- **Deliverable**: test_2_content_extraction.py
+### Task 003: Test & Debug Vector Validation (Priority: Critical)
+**Agent 2 Focus**: How are invalid vectors handled?
+- Write tests for vector dimension validation
+- Test empty vector detection in rag.py
+- Test FAISS compatibility checks
+- Document validation gaps
+- **Deliverable**: test_vector_validation.py + gaps identified
 
-### Task 004: Test Embedding Client Stage (Priority: Critical)
-- Write test for embedding generation
-- Test with sample documents
-- Verify vectors are created with correct dimensions
-- **Deliverable**: test_3_embedding_client.py
+### Task 004: Test & Debug RAG Pipeline (Priority: Critical)
+**Agent 3 Focus**: Where does the pipeline break?
+- Write end-to-end pipeline tests
+- Test document flow from input to storage
+- Identify failure points in the chain
+- Test error propagation
+- **Deliverable**: test_rag_pipeline.py + failure analysis
 
-### Task 005: Test Vector Validation Stage (Priority: Critical)
-- Write test for vector dimension checking
-- Test empty vector handling
-- Verify validation catches bad vectors
-- **Deliverable**: test_4_vector_validation.py
+### Sequential Fix & Verification Tasks:
 
-### Task 006: Test RAG Storage Stage (Priority: Critical)
-- Write test for FAISS operations
-- Test with valid and invalid vectors
-- Verify storage handles edge cases
-- **Deliverable**: test_5_rag_storage.py
+### Task 005: Implement Fixes Based on Test Results (Priority: Critical)
+- Consolidate findings from parallel agents
+- Fix identified issues in order of impact
+- Ensure all tests pass locally
+- **Deliverable**: Bug fixes with passing tests
 
-### Sequential Tasks (After parallel tests complete):
+### Task 006: Docker Verification (Priority: Critical)
+- Rebuild Docker image: `docker-compose build api`
+- Run tests in container: `docker-compose run api pytest`
+- Test full pipeline with real data
+- Verify bug is fixed in production environment
+- **Deliverable**: Docker-verified solution
 
-### Task 007: Run All Tests & Analyze Failures (Priority: Critical)
-- Execute full test suite
-- Document which stages fail
-- Identify root cause from test results
-- **Deliverable**: Root cause analysis document
-
-### Task 008: Fix Code Based on Test Results (Priority: Critical)
-- Fix ONLY what tests identify as broken
-- No speculative changes
-- Re-run tests to verify
-- **Deliverable**: All tests passing
-
-### Task 009: Add CI/CD Testing (Priority: High)
-- Add test step to GitHub Actions
-- Run tests before Docker build
-- **Deliverable**: Automated testing on push
+### Task 007: Document Testing Approach (Priority: High)
+- Create test running instructions
+- Document common test scenarios
+- Add troubleshooting guide
+- **Deliverable**: Testing documentation
 
 ## Success Metrics (TDD-Focused)
 1. **Tests Written First**: All tests created before code changes
 2. **Root Cause Identified**: Tests pinpoint exact failure stage
-3. **Bug Fixed**: Tests pass after minimal code changes
-4. **Time to Complete**: 6 hours with parallel execution
+3. **Bug Fixed**: Tests pass both locally and in Docker
+4. **Time to Complete**: 6 hours with 3 parallel agents
 
 ## What We're NOT Doing
+- ❌ CI/CD pipeline setup
 - ❌ Complex test data management
 - ❌ AI-driven test generation  
-- ❌ Parallel test execution
 - ❌ Performance benchmarking
 - ❌ 100% coverage targets
 - ❌ Service mocking layers
 - ❌ Multiple testing frameworks
+- ❌ GitHub Actions integration
 
-## Next Steps (TDD Workflow)
-1. Setup pytest infrastructure (30 min)
-2. Launch 5 parallel agents to create pipeline tests (1 hour)
-3. Run all tests to identify failure points (30 min)
-4. Fix only what tests prove is broken (1 hour)
-5. Ship it with confidence
+## Next Steps (TDD Workflow with Docker)
+1. Setup pytest infrastructure locally (30 min)
+2. Launch 3 parallel agents for focused investigation (2 hours)
+3. Consolidate findings and implement fixes (1 hour)
+4. Verify fixes in Docker environment (1 hour)
+5. Document and deliver tested solution
