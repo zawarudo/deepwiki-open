@@ -131,6 +131,11 @@ $(echo "$LOGS" | grep -iE "timeout|timed out" | head -5 || echo "None found")
 $(echo "$LOGS" | grep -E "\"code\":\s*(4[0-9]{2}|5[0-9]{2})" | head -5 || echo "None found")
 \`\`\`
 
+### HTTP Errors
+\`\`\`
+$(echo "$LOGS" | grep -E "\"status\":\s*(4[0-9]{2}|5[0-9]{2})" | head -5 || echo "None found")
+\`\`\`
+
 ## Recommendations
 
 $(generate_recommendations)
