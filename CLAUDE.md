@@ -86,3 +86,15 @@ This is an AI-powered documentation generator that automatically creates interac
 - TypeScript: PascalCase for components, camelCase for functions
 - Python: snake_case for functions, PascalCase for classes
 - Use type hints in Python, TypeScript types in frontend
+
+<!-- BEGIN:ARCH-MAP -->
+## Architecture Map
+
+├─ CLAUDE.md | repo root | High-level architecture index
+├─ .ai/architecture/frontend.md | Next.js web application | UI and client interactions  
+├─ .ai/architecture/backend.md | FastAPI services | API endpoints and processing
+│  ├─ .ai/architecture/backend/apis.md | HTTP endpoints | REST API routes
+│  └─ .ai/architecture/backend/ai-providers.md | AI integrations | LLM client implementations
+├─ .ai/architecture/data.md | Storage and pipelines | Embeddings, RAG, state management
+└─ .ai/architecture/platform.md | Infrastructure | Docker, testing, CI/CD
+<!-- END:ARCH-MAP -->
