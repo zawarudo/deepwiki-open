@@ -358,20 +358,23 @@ class TestBatchRetryLogic:
         
         EXPECTED TO FAIL: Current implementation has no retry configuration.
         """
-        # This test assumes a future retry configuration mechanism
+        # Test with custom retry configuration
         custom_max_retries = 2  # Different from default of 3
         custom_base_delay = 0.5  # Different from default of 1
         
-        # Mock the client with custom retry config (this interface doesn't exist yet)
-        # In the future implementation, this might look like:
-        # self.client.retry_config = {"max_retries": custom_max_retries, "base_delay": custom_base_delay}
+        # Create client with custom retry config
+        custom_client = GoogleEmbeddingClient(
+            api_key="test_api_key",
+            max_retries=custom_max_retries,
+            base_delay=custom_base_delay
+        )
         
         failing_response = Mock(status_code=503, text="Service Unavailable")
         
         with patch('requests.post', return_value=failing_response) as mock_post, \
              patch('time.sleep') as mock_sleep:
             
-            result = self.client.call(
+            result = custom_client.call(
                 api_kwargs={"texts": ["test text"], "model": "text-embedding-004"},
                 model_type=ModelType.EMBEDDER
             )
@@ -405,36 +408,37 @@ class TestBatchRetryLogic:
         import threading
         import concurrent.futures
         
+        # Use a single global patch for all threads to test actual concurrency
         responses = [
             Mock(status_code=503, text="Service Unavailable"),
             Mock(status_code=200, json=lambda: {"embeddings": [{"values": [0.1] * 768}]})
-        ]
+        ] * 6  # Enough responses for all concurrent calls (2 responses per call, 3 calls)
         
         results = []
-        call_counts = []
         
         def make_embedding_call():
-            with patch('requests.post', side_effect=responses) as mock_post:
-                result = self.client.call(
-                    api_kwargs={"texts": ["test text"], "model": "text-embedding-004"},
-                    model_type=ModelType.EMBEDDER
-                )
-                results.append(result)
-                call_counts.append(mock_post.call_count)
-                return result
-        
-        # Run multiple concurrent embedding calls
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [executor.submit(make_embedding_call) for _ in range(3)]
-            concurrent.futures.wait(futures)
-        
-        # This assertion WILL FAIL because current implementation doesn't implement retry safety
-        # Each call should have made 2 requests (1 fail + 1 retry success)
-        for i, count in enumerate(call_counts):
-            assert count == 2, (
-                f"Concurrent call {i} expected 2 API calls (1 + 1 retry), got {count}. "
-                f"Current implementation doesn't handle concurrent retry operations safely."
+            result = self.client.call(
+                api_kwargs={"texts": ["test text"], "model": "text-embedding-004"},
+                model_type=ModelType.EMBEDDER
             )
+            results.append(result)
+            return result
+        
+        # Run multiple concurrent embedding calls with global patch
+        with patch('requests.post', side_effect=responses) as mock_post:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                futures = [executor.submit(make_embedding_call) for _ in range(3)]
+                concurrent.futures.wait(futures)
+            
+            # Should have made 2 calls per thread = 6 total calls
+            total_calls = mock_post.call_count
+        
+        # This assertion tests concurrent retry safety
+        # Each call should have made 2 requests (1 fail + 1 retry success) = 6 total
+        assert total_calls == 6, (
+            f"Expected 6 API calls total (3 concurrent calls × 2 requests each), got {total_calls}. "
+            f"Current implementation doesn't handle concurrent retry operations safely."
+        )
         
         # All calls should eventually succeed
         assert len(results) == 3, "Should have 3 concurrent results"
