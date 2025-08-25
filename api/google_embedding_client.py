@@ -183,10 +183,14 @@ class GoogleEmbeddingClient(ModelClient):
                                 self._validate_embedding(vec)
                             except ValueError as e:
                                 # For single input batches, validation failures should fail entirely
-                                # For multi-input batches, skip invalid embeddings (like empty arrays)
+                                # For multi-input batches, skip invalid embeddings except for critical issues
                                 error_msg = f"Invalid embedding at index {start + i}: {str(e)}"
                                 log.error(error_msg)
-                                if len(texts) == 1:
+                                
+                                # Empty embeddings are critical - always fail immediately
+                                if "Empty embedding vector" in str(e) or "zero" in str(e).lower():
+                                    raise EmbeddingGenerationError(error_msg)
+                                elif len(texts) == 1:
                                     # Single input - fail the entire request
                                     raise EmbeddingGenerationError(error_msg)
                                 else:
@@ -228,6 +232,23 @@ class GoogleEmbeddingClient(ModelClient):
         except Exception as e:
             log.error(f"Error calling Google embeddings (batch): {e}")
             return EmbedderOutput(data=[], error=str(e), raw_response=None)
+
+    def _ensure_dimension_consistency(self, embeddings: List[List[float]]) -> List[List[float]]:
+        """Ensure all embeddings have consistent dimensions."""
+        if not embeddings:
+            return embeddings
+        
+        expected_dim = 768  # Google's text-embedding-004 dimension
+        consistent_embeddings = []
+        
+        for i, emb in enumerate(embeddings):
+            if emb and len(emb) == expected_dim:
+                consistent_embeddings.append(emb)
+            else:
+                actual_dim = len(emb) if emb else 0
+                log.warning(f"Skipping embedding at index {i} with dimension {actual_dim}, expected {expected_dim}")
+        
+        return consistent_embeddings
 
     # Avoid pickling issues
     def __getstate__(self):

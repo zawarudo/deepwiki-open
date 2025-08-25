@@ -1,5 +1,6 @@
 import adalflow as adal
 from adalflow.core.types import Document, List
+from typing import Tuple
 from adalflow.components.data_process import TextSplitter, ToEmbeddings
 import os
 import subprocess
@@ -405,6 +406,78 @@ def prepare_data_pipeline(is_ollama_embedder: bool = None):
         splitter, embedder_transformer
     )  # sequential will chain together splitter and embedder
     return data_transformer
+
+def validate_embeddings(embeddings: List[List[float]], expected_dim: int = 768) -> Tuple[List[List[float]], List[int]]:
+    """
+    Validate embedding dimensions and filter invalid ones.
+    
+    Args:
+        embeddings: List of embedding vectors
+        expected_dim: Expected dimension (default 768 for text-embedding-004)
+    
+    Returns:
+        Tuple of (valid_embeddings, invalid_indices)
+        
+    Raises:
+        ValueError: If no valid embeddings are found
+    """
+    valid_embeddings = []
+    invalid_indices = []
+    
+    for i, embedding in enumerate(embeddings):
+        if not embedding:
+            invalid_indices.append(i)
+            logger.warning(f"Empty embedding at index {i}")
+        elif len(embedding) != expected_dim:
+            invalid_indices.append(i)
+            logger.error(f"Invalid dimension at index {i}: {len(embedding)} != {expected_dim}")
+        else:
+            valid_embeddings.append(embedding)
+    
+    if not valid_embeddings:
+        raise ValueError(f"No valid {expected_dim}-dimensional embeddings found")
+    
+    if invalid_indices:
+        logger.warning(f"Filtered {len(invalid_indices)} invalid embeddings out of {len(embeddings)}")
+    
+    return valid_embeddings, invalid_indices
+
+def validate_dimension_consistency(embeddings: List, expected_dim: int = 768) -> bool:
+    """
+    Validate that all embeddings have consistent dimensions.
+    
+    Args:
+        embeddings: List of embeddings (could be raw vectors or Embedding objects)
+        expected_dim: Expected dimension (default 768)
+        
+    Returns:
+        True if all embeddings have consistent dimensions
+        
+    Raises:
+        ValueError: If embeddings have mixed dimensions or wrong dimensions
+    """
+    if not embeddings:
+        return True
+        
+    dimensions = set()
+    for embedding in embeddings:
+        # Handle both raw vectors and Embedding objects
+        if hasattr(embedding, 'embedding'):
+            vec = embedding.embedding
+        else:
+            vec = embedding
+            
+        if vec:  # Skip empty vectors for dimension checking
+            dimensions.add(len(vec))
+    
+    if len(dimensions) > 1:
+        raise ValueError(f"mixed dimension embeddings detected: {dimensions}. All embeddings must have consistent dimensions for FAISS compatibility.")
+    
+    if len(dimensions) == 1 and expected_dim not in dimensions:
+        actual_dim = list(dimensions)[0]
+        raise ValueError(f"Wrong embedding dimension: {actual_dim}, expected {expected_dim}")
+    
+    return True
 
 def transform_documents_and_save_to_db(
     documents: List[Document], db_path: str, is_ollama_embedder: bool = None

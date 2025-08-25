@@ -147,27 +147,11 @@ class TestDimensionConsistency:
 
     def _validate_dimension_consistency(self, embeddings: List[Embedding]) -> bool:
         """
-        Helper method to validate dimension consistency.
-        
-        This method currently DOESN'T EXIST in the actual codebase,
-        which is why the test will fail. This demonstrates the missing
-        validation that should be implemented.
+        Helper method to validate dimension consistency using the actual implementation.
         """
-        # This method should exist but doesn't - causing the test to fail
-        # The actual implementation would check all embeddings have same dimensions
-        dimensions = set()
-        for embedding in embeddings:
-            dimensions.add(len(embedding.embedding))
-        
-        if len(dimensions) > 1:
-            raise ValueError(f"Mixed dimensions detected: {dimensions}. All embeddings must have consistent dimensions for FAISS compatibility.")
-        
-        expected_dim = 768  # For text-embedding-004
-        if len(dimensions) == 1 and expected_dim not in dimensions:
-            actual_dim = list(dimensions)[0]
-            raise ValueError(f"Wrong embedding dimension: {actual_dim}, expected {expected_dim}")
-        
-        return True
+        # Import the actual validation function from data_pipeline
+        from api.data_pipeline import validate_dimension_consistency
+        return validate_dimension_consistency(embeddings)
 
     @pytest.mark.skipif(not FAISS_AVAILABLE, reason="FAISS not available")
     @pytest.mark.unit
@@ -495,7 +479,7 @@ class TestDimensionConsistency:
             # Zero-dimension vectors should be rejected immediately
             # EXPECTED TO FAIL: Current validation might not catch this edge case
             
-            with pytest.raises(EmbeddingGenerationError, match="empty|dimension|zero"):
+            with pytest.raises(EmbeddingGenerationError, match="(?i)empty|dimension|zero"):
                 result = self.client.call(
                     api_kwargs={"texts": ["Text 1", "Text 2"], "model": "text-embedding-004"},
                     model_type=ModelType.EMBEDDER
