@@ -469,7 +469,7 @@ class GoogleEmbeddingClient(ModelClient):
                 return EmbedderOutput(data=[], error=error_msg, raw_response=None)
         except Exception as e:
             # Handle unexpected errors with structured information
-            if texts:
+            if texts and isinstance(texts, (list, tuple)):
                 structured_errors = []
                 for i, text in enumerate(texts):
                     doc_id = doc_ids[i] if i < len(doc_ids) else f"doc_{i}"

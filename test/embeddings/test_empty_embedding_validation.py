@@ -561,18 +561,16 @@ class TestEmptyEmbeddingValidation:
             )
 
     @pytest.mark.unit  
-    def test_red_phase_batch_failure_expects_empty_vectors(self):
+    def test_batch_failure_handles_errors_properly(self):
         """
-        RED PHASE TDD TEST: Expects empty vectors to be created on batch failures.
+        Test that batch failures are handled correctly by returning clean error states
+        rather than creating empty vectors.
         
-        This test is designed to FAIL by expecting the buggy behavior where
-        batch failures result in empty vectors being appended to the results.
-        
-        The test failure will demonstrate that the current implementation
-        is actually handling errors properly (better than the bug description suggests).
+        This test verifies that the implementation properly handles batch failures
+        by returning no data and proper error information instead of buggy behavior.
         """
         with patch('requests.post') as mock_post:
-            # Mock batch failure that should trigger the empty vector bug
+            # Mock batch failure (rate limit)
             mock_response = Mock()
             mock_response.status_code = 429  # Rate limit
             mock_response.text = "Rate Limited"
@@ -583,26 +581,22 @@ class TestEmptyEmbeddingValidation:
                 model_type=ModelType.EMBEDDER
             )
             
-            # RED PHASE: Expecting buggy behavior where empty vectors are created
-            # This test should FAIL, proving the bug exists
-            
-            if not result.data:
-                pytest.fail(
-                    "TDD RED PHASE: Expected empty embeddings to be created on batch failure "
-                    "(demonstrating the bug), but got no embeddings at all. This suggests "
-                    "the implementation properly handles failures by raising exceptions or "
-                    "returning clean error states instead of creating empty vectors."
-                )
-            
-            # Check if any embeddings are empty (this would be the bug)
-            empty_embeddings = [emb for emb in result.data if len(emb.embedding) == 0]
-            
-            # This assertion expects to find empty embeddings (the bug behavior)
-            assert len(empty_embeddings) > 0, (
-                f"TDD RED PHASE: Expected to find empty embeddings created by batch failures "
-                f"(demonstrating the bug), but all {len(result.data)} embeddings have proper "
-                f"dimensions. This indicates the implementation is already properly validated."
+            # Verify proper error handling: no data returned on failure
+            assert not result.data, (
+                f"Expected no embeddings on batch failure, but got {len(result.data)} embeddings. "
+                f"Proper error handling should return empty data array."
             )
+            
+            # Verify error information is provided
+            assert result.error, "Expected error information to be provided on batch failure"
+            
+            # Ensure no empty embeddings are created (no buggy behavior)
+            if result.data:
+                empty_embeddings = [emb for emb in result.data if len(emb.embedding) == 0]
+                assert len(empty_embeddings) == 0, (
+                    f"Found {len(empty_embeddings)} empty embeddings. "
+                    f"Implementation should not create empty vectors on failures."
+                )
 
 
 if __name__ == "__main__":
