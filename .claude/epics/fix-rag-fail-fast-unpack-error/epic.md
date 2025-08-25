@@ -18,6 +18,11 @@ Harden RAG retrieval interfaces to eliminate tuple-unpack failures and standardi
 - Standardize `RAG.call()` to always return a 2-tuple `(answer_or_none, retrieved_list)`.
 - Add a normalization helper for consumers to insulate against legacy shapes.
 
+## Reference Docs
+- PRD: `.claude/prds/fix-rag-fail-fast-unpack-error.md`
+- Edge cases: `.claude/epics/fix-rag-fail-fast-unpack-error/edge-cases.md`
+- Task analyses and test plans: `001-006-*.md` in this directory
+
 ## Technical Approach
 ### Frontend Components
 - None required; impact is backend behavior and logging only.
