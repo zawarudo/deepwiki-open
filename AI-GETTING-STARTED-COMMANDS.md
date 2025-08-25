@@ -51,6 +51,10 @@ ruff check api/
 #### TDD Docker Workflow
 
 ```bash
+# IMPORTANT: Ensure docker-compose.yml includes test volume mount:
+# volumes:
+#   - ./test:/app/test  # Required for pytest to find test files
+
 # 1. Write failing test (outside container)
 cat > test/test_new_feature.py << 'EOF'
 import pytest
@@ -74,6 +78,9 @@ docker-compose run --rm deepwiki python -m pytest test/test_new_feature.py -v
 
 # 5. Run full test suite (ensure no regression)
 docker-compose run --rm deepwiki python -m pytest test/ -v
+
+# 6. View test output with logging
+docker-compose run --rm deepwiki python -m pytest test/ -v -s --log-cli-level=INFO
 ```
 
 ### Complete Docker Rebuild & Test

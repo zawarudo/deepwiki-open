@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   deepwiki:
     build:
@@ -19,6 +17,7 @@ services:
     volumes:
       - ~/.adalflow:/root/.adalflow      # Persist repository and embedding data
       - ./api/logs:/app/api/logs          # Persist log files across container restarts
+      - ./test:/app/test                  # Mount test directory for running tests
     # Resource limits for docker-compose up (not Swarm mode)
     mem_limit: 6g
     mem_reservation: 2g
