@@ -74,13 +74,31 @@ class OllamaDocumentProcessor(DataComponent):
 
         successful_docs = []
         expected_embedding_size = None
+        empty_vector_count = 0
+        failed_count = 0
 
         for i, doc in enumerate(tqdm(output, desc="Processing documents for Ollama embeddings")):
             try:
+                # Debug: Log document being processed
+                if i < 3 or i % 100 == 0:
+                    logger.debug(f"Processing doc {i}: text_len={len(doc.text) if doc.text else 0}")
+                
                 # Get embedding for a single document
                 result = self.embedder(input=doc.text)
+                
+                # Debug: Log embedding result
+                if i < 3:
+                    logger.debug(f"Doc {i} result: has_data={result.data is not None and len(result.data) > 0}, "
+                               f"error={result.error if hasattr(result, 'error') else 'None'}")
+                
                 if result.data and len(result.data) > 0:
                     embedding = result.data[0].embedding
+                    
+                    # Debug: Check for empty embedding
+                    if not embedding or len(embedding) == 0:
+                        empty_vector_count += 1
+                        logger.warning(f"Doc {i}: Received empty embedding vector!")
+                        continue
 
                     # Validate embedding size consistency
                     if expected_embedding_size is None:
@@ -95,11 +113,21 @@ class OllamaDocumentProcessor(DataComponent):
                     output[i].vector = embedding
                     successful_docs.append(output[i])
                 else:
+                    failed_count += 1
                     file_path = getattr(doc, 'meta_data', {}).get('file_path', f'document_{i}')
                     logger.warning(f"Failed to get embedding for document '{file_path}', skipping")
             except Exception as e:
+                failed_count += 1
                 file_path = getattr(doc, 'meta_data', {}).get('file_path', f'document_{i}')
                 logger.error(f"Error processing document '{file_path}': {e}, skipping")
 
-        logger.info(f"Successfully processed {len(successful_docs)}/{len(output)} documents with consistent embeddings")
+        # Debug: Log final statistics
+        logger.info(f"Ollama embedding results: successful={len(successful_docs)}/{len(output)}, "
+                   f"failed={failed_count}, empty_vectors={empty_vector_count}")
+        
+        if len(successful_docs) == 0:
+            logger.error("CRITICAL: No documents were successfully embedded!")
+        elif len(successful_docs) < len(output) / 2:
+            logger.warning(f"WARNING: Only {len(successful_docs)}/{len(output)} documents embedded successfully")
+        
         return successful_docs

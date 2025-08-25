@@ -14,6 +14,7 @@ from typing import List
 from adalflow.core.types import ModelType, Embedding
 
 from api.google_embedding_client import GoogleEmbeddingClient
+from api.embedding_errors import EmbeddingGenerationError
 
 
 class TestEmergencyFix:
@@ -85,19 +86,15 @@ class TestEmergencyFix:
             mock_response.text = "Bad Request"
             mock_post.return_value = mock_response
             
-            result = self.client.call(
-                api_kwargs={"texts": ["test text 1", "test text 2"], "model": "text-embedding-004"},
-                model_type=ModelType.EMBEDDER
-            )
-            
-            # Check for the critical bug: empty vectors being created
-            empty_vectors = [e for e in result.data if hasattr(e, 'embedding') and len(e.embedding) == 0]
-            if empty_vectors:
-                pytest.fail(
-                    f"CRITICAL BUG: Found {len(empty_vectors)} empty embedding vectors at indices "
-                    f"{[e.index for e in empty_vectors]}. This corrupts the database and crashes FAISS indexing. "
-                    f"System should raise exceptions instead of creating empty vectors."
+            # When all requests fail, expect an exception
+            with pytest.raises(EmbeddingGenerationError) as exc_info:
+                result = self.client.call(
+                    api_kwargs={"texts": ["test text 1", "test text 2"], "model": "text-embedding-004"},
+                    model_type=ModelType.EMBEDDER
                 )
+            
+            # Verify the error message
+            assert "Failed to generate any embeddings" in str(exc_info.value)
 
     @pytest.mark.unit
     def test_correct_model_name_default(self):
@@ -219,15 +216,19 @@ class TestEmergencyFix:
                 model_type=ModelType.EMBEDDER
             )
             
-            # Should report the mismatch as an error
+            # Should report the missing embedding as an error
             assert result.error is not None
-            assert "mismatch" in result.error.lower()
+            # The error message mentions "missing" or "failed" for missing embeddings
+            assert "missing" in result.error.lower() or "failed" in result.error.lower()
+            
+            # Should return the one successful embedding
+            assert len(result.data) == 1
+            assert len(result.data[0].embedding) == 768
             
             # After the fix, should not pad with empty vectors
-            if result.data:
-                for embedding in result.data:
-                    if hasattr(embedding, 'embedding') and len(embedding.embedding) == 0:
-                        pytest.fail("Count mismatch should not create empty vectors")
+            for embedding in result.data:
+                if hasattr(embedding, 'embedding') and len(embedding.embedding) == 0:
+                    pytest.fail("Count mismatch should not create empty vectors")
 
     @pytest.mark.network
     def test_retry_logic_concept(self):

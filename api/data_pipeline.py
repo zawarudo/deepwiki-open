@@ -395,14 +395,17 @@ def prepare_data_pipeline(is_ollama_embedder: bool = None):
 
     if is_ollama_embedder:
         # Use Ollama document processor for single-document processing
+        logger.debug("Using OllamaDocumentProcessor for embeddings")
         embedder_transformer = OllamaDocumentProcessor(embedder=embedder)
     else:
         # Use batch processing for other embedders
         batch_size = embedder_config.get("batch_size", 500)
+        logger.debug(f"Using ToEmbeddings with batch_size={batch_size}")
         embedder_transformer = ToEmbeddings(
             embedder=embedder, batch_size=batch_size
         )
 
+    logger.debug(f"Creating Sequential transformer with splitter (chunk_size={splitter_cfg.get('chunk_size', 'default')}) and embedder")
     data_transformer = adal.Sequential(
         splitter, embedder_transformer
     )  # sequential will chain together splitter and embedder
@@ -525,16 +528,52 @@ def transform_documents_and_save_to_db(
 
         # Attempt transform and persist
         try:
+            # Debug: Log transform attempt details
+            logger.info(f"Transform attempt {attempt + 1}/{max_retries + 1}: "
+                       f"batch_size={current_batch_size}, chunk_size={current_chunk_size}, "
+                       f"docs={len(documents)}, is_ollama={is_ollama_embedder}")
+            
             db = LocalDB()
             db.register_transformer(transformer=data_transformer, key="split_and_embed")
             db.load(documents)
+            
+            # Debug: Log before transform
+            logger.debug(f"Starting transform with {len(documents)} documents")
             db.transform(key="split_and_embed")
+            
+            # Debug: Log after transform
+            logger.debug("Transform completed, validating vectors...")
 
             # Simple success validation: ensure at least one non-empty vector
             transformed_docs = db.get_transformed_data(key="split_and_embed")
+            
+            # Debug: Detailed vector analysis
+            logger.debug(f"Got {len(transformed_docs) if transformed_docs else 0} transformed documents")
+            
             has_valid = False
-            for doc in transformed_docs or []:
+            empty_count = 0
+            none_count = 0
+            valid_count = 0
+            dimension_stats = {}
+            
+            for i, doc in enumerate(transformed_docs or []):
                 vec = getattr(doc, "vector", None)
+                
+                # Debug: Log first few document vectors for inspection
+                if i < 3:
+                    vec_info = f"Doc {i}: vector type={type(vec).__name__}"
+                    if vec is None:
+                        vec_info += ", value=None"
+                    elif isinstance(vec, list):
+                        vec_info += f", len={len(vec)}"
+                        if len(vec) > 0:
+                            vec_info += f", first_val={vec[0]:.4f}" if isinstance(vec[0], (int, float)) else f", first_val_type={type(vec[0])}"
+                    logger.debug(vec_info)
+                
+                if vec is None:
+                    none_count += 1
+                    continue
+                    
                 length = 0
                 if isinstance(vec, list):
                     length = len(vec)
@@ -542,10 +581,23 @@ def transform_documents_and_save_to_db(
                     length = vec.shape[0] if len(vec.shape) == 1 else vec.shape[-1]
                 elif hasattr(vec, "__len__") and vec is not None:
                     length = len(vec)
+                
                 if length > 0:
                     has_valid = True
-                    break
+                    valid_count += 1
+                    dimension_stats[length] = dimension_stats.get(length, 0) + 1
+                else:
+                    empty_count += 1
+            
+            # Debug: Log vector statistics
+            logger.info(f"Vector validation: valid={valid_count}, empty={empty_count}, none={none_count}, "
+                       f"total={len(transformed_docs) if transformed_docs else 0}")
+            if dimension_stats:
+                logger.info(f"Dimension distribution: {dimension_stats}")
+            
             if not has_valid:
+                logger.error(f"All {len(transformed_docs) if transformed_docs else 0} vectors are empty/invalid! "
+                           f"(empty={empty_count}, none={none_count})")
                 raise ValueError("Adaptive retry: all embedding vectors are empty after transform")
 
             # Success -> save and return

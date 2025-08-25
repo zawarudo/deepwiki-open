@@ -291,6 +291,10 @@ class GoogleEmbeddingClient(ModelClient):
                         # If batch request fails, fall back to single requests with retry
                         status_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') and e.response else 'network'
                         log.warning(f"Batch embeddings error ({status_code}), falling back to single requests: {e}")
+
+                        # Log the error fully
+                        for error_properties in e.response.json():
+                            log.error(f"Error properties: {error_properties}")
                         
                         # Process each text individually with retry logic
                         for i, text in enumerate(chunk):

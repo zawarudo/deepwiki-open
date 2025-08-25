@@ -138,6 +138,9 @@ def setup_logging(format: str = None, structured: bool = None):
 
     # Apply logging configuration
     logging.basicConfig(level=log_level, handlers=handlers, force=True)
+    
+    # Keep MLflow warning visible - it's harmless but good to know about
+    # logging.getLogger("adalflow.tracing.mlflow_integration").setLevel(logging.ERROR)
 
     # Log configuration info
     logger = logging.getLogger(__name__)

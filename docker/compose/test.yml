@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  deepwiki-test:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        - CUSTOM_CERT_DIR=certs
+    container_name: deepwiki-test
+    ports:
+      - "8001:8001"  # API port
+      - "3001:3000"  # Next.js port (different to avoid conflicts)
+    environment:
+      # Core settings
+      - PORT=8001
+      - NODE_ENV=test
+      - SERVER_BASE_URL=http://localhost:8001
+      
+      # Logging for debugging
+      - LOG_LEVEL=DEBUG
+      - LOG_FORMAT=json
+      - LOG_FILE_PATH=/app/test-results/test.log
+      
+      # Test mode settings
+      - USE_MOCK_EMBEDDINGS=${USE_MOCK_EMBEDDINGS:-false}
+      - TEST_MODE=true
+      - PYTEST_VERBOSE=true
+      
+      # API Keys (will use mock if not provided)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-mock_key}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-mock_key}
+      
+    env_file:
+      - .env.test  # Use test-specific env file if exists
+      - .env       # Fallback to regular env
+      
+    volumes:
+      # Mount source code for testing
+      - ./api:/app/api:ro  # Read-only API code
+      - ./test:/app/test:ro # Read-only test code
+      
+      # Writable directories for test output
+      - ./test-results:/app/test-results
+      - ./test-reports:/app/test-reports
+      - ./api/logs:/app/api/logs
+      
+      # Persist test data
+      - test-adalflow:/root/.adalflow
+      
+    # Resource limits for testing
+    mem_limit: 4g
+    mem_reservation: 2g
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+      
+    # Override default command for test mode
+    command: |
+      sh -c "
+        echo '=== DeepWiki Test Container Started ===' &&
+        echo 'Environment: TEST' &&
+        echo 'Mock Mode: ${USE_MOCK_EMBEDDINGS:-false}' &&
+        echo 'Starting services...' &&
+        /app/start.sh
+      "
+
+  # Optional: Separate test runner service
+  test-runner:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: deepwiki-test-runner
+    depends_on:
+      deepwiki-test:
+        condition: service_healthy
+    environment:
+      - TEST_API_URL=http://deepwiki-test:8001
+      - USE_MOCK_EMBEDDINGS=${USE_MOCK_EMBEDDINGS:-true}
+    volumes:
+      - ./test:/app/test:ro
+      - ./test-results:/app/test-results
+      - ./scripts:/app/scripts:ro
+    command: |
+      sh -c "
+        echo 'Waiting for API to be ready...' &&
+        sleep 5 &&
+        echo 'Running test suite...' &&
+        pytest test/ -v --tb=short \
+          --html=/app/test-results/report.html \
+          --self-contained-html \
+          --junit-xml=/app/test-results/junit.xml &&
+        echo 'Tests complete!'
+      "
+    profiles:
+      - test  # Only run when explicitly requested
+
+volumes:
+  test-adalflow:
+    name: deepwiki-test-adalflow
+
+networks:
+  default:
+    name: deepwiki-test-network

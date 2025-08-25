@@ -27,6 +27,18 @@
 - **DeepResearch**: Multi-turn research process that thoroughly investigates complex topics
 - **Multiple Model Providers**: Support for Google Gemini, OpenAI, OpenRouter, and local Ollama models
 
+## 🧪 Testing
+
+For comprehensive testing documentation, see [TESTING.md](TESTING.md). Quick test commands:
+
+```bash
+# Run all tests
+pytest test/
+
+# Run tests in Docker
+./docker/scripts/test-pipeline.sh
+```
+
 ## 🚀 Quick Start (Super Easy!)
 
 ### Option 1: Using Docker

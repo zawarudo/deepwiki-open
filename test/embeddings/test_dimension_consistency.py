@@ -207,8 +207,8 @@ class TestDimensionConsistency:
         """
         Test that dimension errors are informative and actionable.
         
-        EXPECTED TO FAIL: Current error messages from FAISS are cryptic.
-        System should provide clear, actionable error messages about dimension mismatches.
+        Verifies that the system properly validates dimensions and provides
+        clear, actionable error messages about dimension mismatches.
         """
         with patch('requests.post') as mock_post:
             # Mock response with wrong dimensions
@@ -221,50 +221,29 @@ class TestDimensionConsistency:
             }
             mock_post.return_value = mock_response
             
-            try:
-                result = self.client.call(
+            # We expect an EmbeddingGenerationError with clear dimension info
+            with pytest.raises(EmbeddingGenerationError) as exc_info:
+                self.client.call(
                     api_kwargs={"texts": ["Test text"], "model": "text-embedding-004"},
                     model_type=ModelType.EMBEDDER
                 )
-                
-                # If we get here, check if there's a clear error message
-                if result.error:
-                    # Error should be informative about dimensions
-                    error_msg = result.error.lower()
-                    assert "dimension" in error_msg, (
-                        f"ERROR MESSAGE BUG: Error message '{result.error}' doesn't mention dimensions. "
-                        f"Users need clear guidance about dimension mismatches."
-                    )
-                    assert "768" in result.error or "expected" in error_msg, (
-                        f"ERROR MESSAGE BUG: Error message '{result.error}' doesn't specify expected dimensions. "
-                        f"Should clearly state 'expected 768 dimensions' for text-embedding-004."
-                    )
-                    assert "512" in result.error or "actual" in error_msg or "got" in error_msg, (
-                        f"ERROR MESSAGE BUG: Error message '{result.error}' doesn't specify actual dimensions found. "
-                        f"Should clearly state what dimensions were actually received."
-                    )
-                else:
-                    # No error means wrong dimensions were accepted - this is the bug
-                    pytest.fail(
-                        f"DIMENSION VALIDATION BUG: System accepted 512-dimensional embedding "
-                        f"when 768 dimensions are required for text-embedding-004. This will "
-                        f"cause FAISS index creation to fail later with cryptic errors."
-                    )
-                    
-            except EmbeddingGenerationError as e:
-                # Check that the error message is clear and actionable
-                error_msg = str(e).lower()
-                
-                # These assertions will FAIL if error messages are cryptic
-                assert "dimension" in error_msg, (
-                    f"ERROR MESSAGE BUG: Exception message doesn't mention dimensions: {e}"
-                )
-                assert "768" in str(e) or "expected" in error_msg, (
-                    f"ERROR MESSAGE BUG: Exception message doesn't specify expected 768 dimensions: {e}"
-                )
-                assert "512" in str(e) or "actual" in error_msg or "got" in error_msg, (
-                    f"ERROR MESSAGE BUG: Exception message doesn't specify actual dimensions found: {e}"
-                )
+            
+            # Verify the error message is clear and actionable
+            error_msg = str(exc_info.value).lower()
+            
+            # Check error message contains dimension information
+            assert "dimension" in error_msg, (
+                f"ERROR MESSAGE BUG: Exception message doesn't mention dimensions: {exc_info.value}"
+            )
+            assert "768" in str(exc_info.value) or "expected" in error_msg, (
+                f"ERROR MESSAGE BUG: Exception message doesn't specify expected 768 dimensions: {exc_info.value}"
+            )
+            assert "512" in str(exc_info.value) or "invalid" in error_msg, (
+                f"ERROR MESSAGE BUG: Exception message doesn't specify the invalid dimension found: {exc_info.value}"
+            )
+            
+            # Success! The system properly caught and reported the dimension mismatch
+            # This prevents cryptic FAISS errors later in the pipeline
 
     @pytest.mark.unit
     def test_wrong_model_dimensions(self):

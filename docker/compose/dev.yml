@@ -1,7 +1,7 @@
 services:
   api:
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
     command: sh -c "python -m api.main --port ${PORT:-8001}"
     environment:
