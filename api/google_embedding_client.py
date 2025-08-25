@@ -2,6 +2,7 @@
 
 import os
 import logging
+import asyncio
 from typing import Dict, Optional, Any, List
 
 import requests
@@ -15,6 +16,10 @@ from adalflow.core.types import (
 )
 
 log = logging.getLogger(__name__)
+
+
+class EmbeddingGenerationError(Exception):
+    """Raised when embedding generation fails after retries."""
 
 
 class GoogleEmbeddingClient(ModelClient):
@@ -71,6 +76,14 @@ class GoogleEmbeddingClient(ModelClient):
         # Google Embeddings expects one input per request. We'll batch in call().
         return {"texts": texts, "model": model}
 
+    def _validate_embedding(self, embedding: List[float], expected_dim: int = 768) -> bool:
+        """Validate embedding has correct dimensions."""
+        if not embedding:
+            raise ValueError("Empty embedding vector")
+        if len(embedding) != expected_dim:
+            raise ValueError(f"Invalid embedding dimension: {len(embedding)}, expected {expected_dim}")
+        return True
+
     def call(self, api_kwargs: Dict = None, model_type: ModelType = ModelType.UNDEFINED) -> EmbedderOutputType:
         if model_type != ModelType.EMBEDDER:
             raise ValueError(f"model_type {model_type} is not supported")
@@ -111,21 +124,30 @@ class GoogleEmbeddingClient(ModelClient):
                         single_payload = {"model": model, "content": {"parts": [{"text": text}]}}
                         r = requests.post(single_url, json=single_payload, headers=headers, timeout=60)
                         if r.status_code != 200:
-                            # Do not abort entire operation; record error and append empty embedding placeholder
+                            # Record error and raise exception instead of creating empty vector
                             any_errors = True
                             try:
-                                error_messages.append(r.text[:200])
+                                error_msg = r.text[:200]
                             except Exception:
-                                error_messages.append(f"status={r.status_code}")
-                            embeddings.append(Embedding(embedding=[], index=start + i))
-                            continue
+                                error_msg = f"status={r.status_code}"
+                            error_messages.append(error_msg)
+                            log.error(f"Failed to generate embedding for text at index {start + i}: {error_msg}")
+                            raise EmbeddingGenerationError(
+                                f"Failed to generate embedding after retries: {error_msg}"
+                            )
                         try:
                             d = r.json()
                             vec = d.get("embedding", {}).get("values", [])
+                            # Validate embedding dimensions
+                            self._validate_embedding(vec)
                         except Exception as e:
                             any_errors = True
-                            error_messages.append(str(e)[:200])
-                            vec = []
+                            error_msg = str(e)[:200]
+                            error_messages.append(error_msg)
+                            log.error(f"Failed to parse embedding for text at index {start + i}: {error_msg}")
+                            raise EmbeddingGenerationError(
+                                f"Failed to parse or validate embedding: {error_msg}"
+                            )
                         embeddings.append(Embedding(embedding=vec, index=start + i))
                 else:
                     d = resp.json()
@@ -140,8 +162,21 @@ class GoogleEmbeddingClient(ModelClient):
                     for i in range(len(chunk)):
                         if i < len(resp_embs):
                             vec = resp_embs[i].get("values", [])
+                            try:
+                                # Validate embedding dimensions
+                                self._validate_embedding(vec)
+                            except Exception as e:
+                                any_errors = True
+                                error_msg = f"Invalid embedding at index {start + i}: {str(e)}"
+                                error_messages.append(error_msg)
+                                log.error(error_msg)
+                                raise EmbeddingGenerationError(error_msg)
                         else:
-                            vec = []
+                            # Missing embedding in batch response
+                            error_msg = f"Missing embedding for text at index {start + i} in batch response"
+                            error_messages.append(error_msg)
+                            log.error(error_msg)
+                            raise EmbeddingGenerationError(error_msg)
                         embeddings.append(Embedding(embedding=vec, index=start + i))
 
             error_summary = None
