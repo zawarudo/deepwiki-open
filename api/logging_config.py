@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -9,18 +10,62 @@ class IgnoreLogChangeDetectedFilter(logging.Filter):
         return "Detected file change in" not in record.getMessage()
 
 
-def setup_logging(format: str = None):
+class StructuredFormatter(logging.Formatter):
+    """Formatter that supports both structured logging and traditional formatting."""
+    
+    def format(self, record):
+        # Create base log entry
+        log_entry = {
+            'timestamp': self.formatTime(record),
+            'level': record.levelname,
+            'logger': record.name,
+            'module': record.module,
+            'function': record.funcName,
+            'line': record.lineno,
+            'message': record.getMessage()
+        }
+        
+        # Add structured data if present in record.extra
+        if hasattr(record, 'batch_summary'):
+            log_entry['batch_summary'] = record.batch_summary
+        if hasattr(record, 'error_summary'):
+            log_entry['error_summary'] = record.error_summary
+        if hasattr(record, 'error_details'):
+            log_entry['error_details'] = record.error_details
+        if hasattr(record, 'success_count'):
+            log_entry['success_count'] = record.success_count
+        if hasattr(record, 'failure_count'):
+            log_entry['failure_count'] = record.failure_count
+        if hasattr(record, 'total'):
+            log_entry['total'] = record.total
+        if hasattr(record, 'success_rate'):
+            log_entry['success_rate'] = record.success_rate
+            
+        # Add exception info if present
+        if record.exc_info:
+            log_entry['exception'] = self.formatException(record.exc_info)
+        
+        return json.dumps(log_entry, ensure_ascii=False)
+
+
+def setup_logging(format: str = None, structured: bool = None):
     """
     Configure logging for the application with log rotation.
+
+    Args:
+        format (str, optional): Custom log format string
+        structured (bool, optional): Use structured JSON logging. 
+                                   If None, determined by LOG_FORMAT env var.
 
     Environment variables:
         LOG_LEVEL: Log level (default: INFO)
         LOG_FILE_PATH: Path to log file (default: logs/application.log)
         LOG_MAX_SIZE: Max size in MB before rotating (default: 10MB)
         LOG_BACKUP_COUNT: Number of backup files to keep (default: 5)
+        LOG_FORMAT: 'structured' for JSON logging, 'text' for traditional (default: text)
 
     Ensures log directory exists, prevents path traversal, and configures
-    both rotating file and console handlers.
+    both rotating file and console handlers with structured logging support.
     """
     # Determine log directory and default file path
     base_dir = Path(__file__).parent
@@ -57,8 +102,19 @@ def setup_logging(format: str = None):
     except ValueError:
         backup_count = 5
 
+    # Determine logging format
+    if structured is None:
+        log_format_env = os.environ.get("LOG_FORMAT", "text").lower()
+        structured = log_format_env == "structured"
+    
     # Configure format
-    log_format = format or "%(asctime)s - %(levelname)s - %(name)s - %(filename)s:%(lineno)d - %(message)s"
+    if structured:
+        # Use structured JSON formatter
+        formatter = StructuredFormatter()
+    else:
+        # Use traditional text formatter
+        log_format = format or "%(asctime)s - %(levelname)s - %(name)s - %(filename)s:%(lineno)d - %(message)s"
+        formatter = logging.Formatter(log_format)
 
     # Create handlers
     handlers = []
@@ -67,7 +123,6 @@ def setup_logging(format: str = None):
     if not os.environ.get("DISABLE_FILE_LOGGING"):
         try:
             file_handler = RotatingFileHandler(resolved_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
-            formatter = logging.Formatter(log_format)
             file_handler.setFormatter(formatter)
             file_handler.addFilter(IgnoreLogChangeDetectedFilter())
             handlers.append(file_handler)
@@ -77,7 +132,6 @@ def setup_logging(format: str = None):
             # Continue without file handler
     
     console_handler = logging.StreamHandler()
-    formatter = logging.Formatter(log_format)
     console_handler.setFormatter(formatter)
     console_handler.addFilter(IgnoreLogChangeDetectedFilter())
     handlers.append(console_handler)
@@ -89,6 +143,7 @@ def setup_logging(format: str = None):
     logger = logging.getLogger(__name__)
     logger.debug(
         f"Logging configured: level={log_level_str}, "
+        f"format={'structured' if structured else 'text'}, "
         f"file={resolved_path}, max_size={max_bytes} bytes, "
         f"backup_count={backup_count}"
     )

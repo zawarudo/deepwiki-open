@@ -19,6 +19,7 @@ import requests
 from requests.exceptions import RequestException
 
 from api.tools.embedder import get_embedder
+from api.embedding_errors import EmbeddingGenerationError as StructuredEmbeddingGenerationError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -554,7 +555,15 @@ def transform_documents_and_save_to_db(
 
         except Exception as e:
             last_error = e
-            logger.error(f"Transform attempt {attempt + 1} failed: {e}")
+            # Enhanced error logging with document context
+            if isinstance(e, StructuredEmbeddingGenerationError):
+                logger.error(f"Transform attempt {attempt + 1} failed with structured error: {e.get_summary()}")
+                # Log failed document details
+                for error in e.errors[:3]:  # First 3 errors for context
+                    logger.error(f"Failed document: {error.document_id} - {error.error_type}: {error.error_message}")
+            else:
+                logger.error(f"Transform attempt {attempt + 1} failed: {e}")
+                logger.info(f"Processing {len(documents)} documents (batch_size={current_batch_size}, chunk_size={current_chunk_size})")
 
             # Stop if adaptive retry is disabled or we've exhausted retries
             if attempt >= max_retries:
@@ -577,7 +586,16 @@ def transform_documents_and_save_to_db(
 
     # If we reach here, adaptive retries failed
     if last_error is not None:
-        raise last_error
+        # Enhance error with processing context
+        if isinstance(last_error, StructuredEmbeddingGenerationError):
+            # Error already has structured information
+            raise last_error
+        else:
+            # Create enhanced error message for non-structured errors
+            enhanced_msg = (f"Document transformation failed after {max_retries + 1} attempts. "
+                          f"Processing {len(documents)} documents with batch_size={current_batch_size}, "
+                          f"chunk_size={current_chunk_size}. Original error: {last_error}")
+            raise RuntimeError(enhanced_msg) from last_error
     raise RuntimeError("Transform failed unexpectedly without an error")
     # Post-transform validation: count valid vs empty vectors
     try:

@@ -4,6 +4,7 @@ import os
 import logging
 import asyncio
 import time
+from datetime import datetime
 from typing import Dict, Optional, Any, List, Callable
 from functools import wraps
 
@@ -15,6 +16,15 @@ from adalflow.core.types import (
     EmbedderOutput,
     Embedding,
     EmbedderOutputType,
+)
+from api.embedding_errors import (
+    EmbeddingError,
+    BatchSummary,
+    EmbeddingGenerationError as StructuredEmbeddingGenerationError,
+    create_error_info,
+    create_batch_summary,
+    log_batch_results,
+    format_user_friendly_error
 )
 
 log = logging.getLogger(__name__)
@@ -44,10 +54,14 @@ def exponential_backoff_retry(
                             # Check for Retry-After header
                             retry_after = getattr(e, 'retry_after', None)
                             if retry_after:
-                                sleep_time = float(retry_after)
-                                log.warning(f"Attempt {attempt + 1} rate limited. Waiting {sleep_time}s (Retry-After header)...")
-                                time.sleep(sleep_time)
-                                continue
+                                try:
+                                    sleep_time = float(retry_after)
+                                    log.warning(f"Attempt {attempt + 1} rate limited. Waiting {sleep_time}s (Retry-After header)...")
+                                    time.sleep(sleep_time)
+                                    continue
+                                except (ValueError, TypeError):
+                                    # Invalid retry_after value, use default backoff
+                                    log.warning(f"Invalid retry_after value: {retry_after}, using default backoff")
                         
                         log.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
                         time.sleep(delay)
@@ -76,6 +90,7 @@ class PermanentHTTPError(Exception):
         self.status_code = status_code
 
 
+# Keep original for backward compatibility
 class EmbeddingGenerationError(Exception):
     """Raised when embedding generation fails after retries."""
 
@@ -221,13 +236,17 @@ class GoogleEmbeddingClient(ModelClient):
         api_kwargs = api_kwargs or {}
         texts: List[str] = api_kwargs.get("texts", [])
         model: str = api_kwargs.get("model", "text-embedding-004")
+        
+        # Generate document IDs for tracking
+        doc_ids = api_kwargs.get("doc_ids") or [f"doc_{i}" for i in range(len(texts))]
 
         api_key = self._get_api_key()
         headers = {"Content-Type": "application/json"}
 
         embeddings: List[Embedding] = []
+        structured_errors: List[EmbeddingError] = []
         any_errors: bool = False
-        error_messages: List[str] = []
+        error_messages: List[str] = []  # Keep for backward compatibility
 
         # Use batch endpoint for efficiency
         try:
@@ -251,14 +270,17 @@ class GoogleEmbeddingClient(ModelClient):
                     # For single text, retry the batch request itself
                     try:
                         resp = self._make_retryable_request(url, json=payload, headers=headers, timeout=120)
-                    except PermanentHTTPError as e:
-                        error_msg = f"All retry attempts failed: {e}"
-                        log.error(error_msg)
-                        return EmbedderOutput(data=[], error=error_msg, raw_response=None)
-                    except RetryableHTTPError as e:
-                        error_msg = f"All retry attempts failed: {e}"
-                        log.error(error_msg)
-                        return EmbedderOutput(data=[], error=error_msg, raw_response=None)
+                    except (PermanentHTTPError, RetryableHTTPError) as e:
+                        # For single text failures, create structured error
+                        doc_id = doc_ids[0] if doc_ids else "doc_0"
+                        structured_error = create_error_info(e, texts[0], doc_id, 0)
+                        summary = create_batch_summary(0, [structured_error], 1)
+                        log_batch_results(summary, [structured_error])
+                        
+                        # For single text failures, return error instead of raising exception
+                        # to maintain API compatibility with tests
+                        error_summary = format_user_friendly_error(summary, [structured_error])
+                        return EmbedderOutput(data=[], error=error_summary, raw_response=None)
                 else:
                     # For multiple texts, try batch once then fallback to individual requests
                     try:
@@ -275,6 +297,8 @@ class GoogleEmbeddingClient(ModelClient):
                             single_url = f"{self.base_url}/models/{model}:embedContent?key={api_key}"
                             single_payload = {"model": model, "content": {"parts": [{"text": text}]}}
                             
+                            doc_id = doc_ids[start + i] if start + i < len(doc_ids) else f"doc_{start + i}"
+                            
                             try:
                                 # Use retry logic for individual requests
                                 r = self._make_retryable_request(single_url, json=single_payload, headers=headers, timeout=60)
@@ -283,25 +307,25 @@ class GoogleEmbeddingClient(ModelClient):
                                 # Validate embedding dimensions
                                 self._validate_embedding(vec)
                                 embeddings.append(Embedding(embedding=vec, index=start + i))
-                            except PermanentHTTPError as single_e:
-                                # Permanent errors should not be retried
+                            except (PermanentHTTPError, RetryableHTTPError) as single_e:
+                                # Create structured error info
+                                structured_error = create_error_info(single_e, text, doc_id, start + i)
+                                structured_errors.append(structured_error)
+                                
                                 any_errors = True
                                 error_msg = str(single_e)[:200]
                                 error_messages.append(error_msg)
-                                log.error(f"Permanent error for text at index {start + i}: {error_msg}")
-                                continue  # Skip this document
-                            except RetryableHTTPError as single_e:
-                                # Even single request failed after retries
-                                any_errors = True
-                                error_msg = str(single_e)[:200]
-                                error_messages.append(error_msg)
-                                log.error(f"Failed to generate embedding for text at index {start + i} after retries: {error_msg}")
+                                log.error(f"Failed to generate embedding for {doc_id} at index {start + i}: {error_msg}")
                                 continue  # Skip this document
                             except Exception as e:
+                                # Create structured error info for unexpected errors
+                                structured_error = create_error_info(e, text, doc_id, start + i)
+                                structured_errors.append(structured_error)
+                                
                                 any_errors = True
                                 error_msg = str(e)[:200]
                                 error_messages.append(error_msg)
-                                log.error(f"Failed to parse embedding for text at index {start + i}: {error_msg}")
+                                log.error(f"Failed to parse embedding for {doc_id} at index {start + i}: {error_msg}")
                                 continue  # Skip this document
                         continue  # Move to next chunk
                 
@@ -345,12 +369,28 @@ class GoogleEmbeddingClient(ModelClient):
                             error_msg = f"Invalid embedding at index {start + i}: {str(e)}"
                             log.error(error_msg)
                             
+                            doc_id = doc_ids[start + i] if start + i < len(doc_ids) else f"doc_{start + i}"
+                            
+                            # Create structured error for validation failures
+                            validation_error = create_error_info(e, chunk[i], doc_id, start + i)
+                            structured_errors.append(validation_error)
+                            
                             # Empty embeddings are critical - always fail immediately
                             if "Empty embedding vector" in str(e) or "zero" in str(e).lower():
-                                raise EmbeddingGenerationError(error_msg)
+                                summary = create_batch_summary(len(embeddings), structured_errors, len(texts))
+                                raise StructuredEmbeddingGenerationError(
+                                    error_msg, 
+                                    errors=structured_errors, 
+                                    summary=summary
+                                )
                             elif len(texts) == 1:
-                                # Single input - fail the entire request
-                                raise EmbeddingGenerationError(error_msg)
+                                # Single input - fail the entire request with structured error
+                                summary = create_batch_summary(0, structured_errors, 1)
+                                raise StructuredEmbeddingGenerationError(
+                                    error_msg,
+                                    errors=structured_errors,
+                                    summary=summary
+                                )
                             else:
                                 # Multi-input - skip this embedding
                                 any_errors = True
@@ -358,6 +398,10 @@ class GoogleEmbeddingClient(ModelClient):
                                 continue
                         except Exception as e:
                             # Other failures can be skipped
+                            doc_id = doc_ids[start + i] if start + i < len(doc_ids) else f"doc_{start + i}"
+                            validation_error = create_error_info(e, chunk[i], doc_id, start + i)
+                            structured_errors.append(validation_error)
+                            
                             any_errors = True
                             error_msg = f"Failed to validate embedding at index {start + i}: {str(e)}"
                             error_messages.append(error_msg)
@@ -365,6 +409,18 @@ class GoogleEmbeddingClient(ModelClient):
                             continue  # Skip this embedding
                     else:
                         # Missing embedding in batch response
+                        doc_id = doc_ids[start + i] if start + i < len(doc_ids) else f"doc_{start + i}"
+                        missing_error = EmbeddingError(
+                            document_id=doc_id,
+                            document_snippet=chunk[i][:100] + "..." if len(chunk[i]) > 100 else chunk[i],
+                            error_type="MissingEmbeddingError",
+                            error_message=f"Missing embedding for text at index {start + i} in batch response",
+                            suggested_action="Retry the request, this may be a transient API issue",
+                            timestamp=datetime.now().isoformat(),
+                            index=start + i
+                        )
+                        structured_errors.append(missing_error)
+                        
                         any_errors = True
                         error_msg = f"Missing embedding for text at index {start + i} in batch response"
                         error_messages.append(error_msg)
@@ -372,29 +428,69 @@ class GoogleEmbeddingClient(ModelClient):
                         continue  # Skip this embedding
                     embeddings.append(Embedding(embedding=vec, index=start + i))
 
-            error_summary = None
-            if any_errors:
-                # Summarize errors but still return whatever embeddings we obtained
-                unique_msgs = [m for idx, m in enumerate(error_messages) if m not in error_messages[:idx]]
+            # Create summary and log results
+            if structured_errors:
+                summary = create_batch_summary(len(embeddings), structured_errors, len(texts))
+                log_batch_results(summary, structured_errors)
+                
+                # For complete failures, raise structured exception
                 if len(embeddings) == 0:
-                    error_summary = f"Failed to generate any embeddings. Examples: {', '.join(unique_msgs[:3])}"
-                else:
-                    error_summary = (
-                        f"One or more embedding requests failed; partial results returned. "
-                        f"Examples: {', '.join(unique_msgs[:3])}"
+                    raise StructuredEmbeddingGenerationError(
+                        "Failed to generate any embeddings",
+                        errors=structured_errors,
+                        summary=summary
                     )
-            return EmbedderOutput(data=embeddings, error=error_summary, raw_response=None)
-        except EmbeddingGenerationError:
+                
+                # For partial failures, return results with structured error message
+                error_summary = format_user_friendly_error(summary, structured_errors)
+                return EmbedderOutput(data=embeddings, error=error_summary, raw_response=None)
+            
+            # No errors - log success
+            if len(embeddings) > 0:
+                log.info(f"Successfully generated {len(embeddings)} embeddings")
+            
+            return EmbedderOutput(data=embeddings, error=None, raw_response=None)
+        except (EmbeddingGenerationError, StructuredEmbeddingGenerationError):
             # Re-raise embedding generation errors directly
             raise
         except (RetryableHTTPError, PermanentHTTPError) as e:
-            # Handle retry-related errors
-            error_msg = f"All retry attempts failed: {e}"
-            log.error(error_msg)
-            return EmbedderOutput(data=[], error=error_msg, raw_response=None)
+            # Handle retry-related errors with structured information
+            if texts:
+                # Create errors for all texts since none could be processed
+                structured_errors = []
+                for i, text in enumerate(texts):
+                    doc_id = doc_ids[i] if i < len(doc_ids) else f"doc_{i}"
+                    error_info = create_error_info(e, text, doc_id, i)
+                    structured_errors.append(error_info)
+                
+                summary = create_batch_summary(0, structured_errors, len(texts))
+                log_batch_results(summary, structured_errors)
+                
+                # Return error instead of raising exception for API compatibility
+                error_summary = format_user_friendly_error(summary, structured_errors)
+                return EmbedderOutput(data=[], error=error_summary, raw_response=None)
+            else:
+                error_msg = f"All retry attempts failed: {e}"
+                log.error(error_msg)
+                return EmbedderOutput(data=[], error=error_msg, raw_response=None)
         except Exception as e:
-            log.error(f"Error calling Google embeddings (batch): {e}")
-            return EmbedderOutput(data=[], error=str(e), raw_response=None)
+            # Handle unexpected errors with structured information
+            if texts:
+                structured_errors = []
+                for i, text in enumerate(texts):
+                    doc_id = doc_ids[i] if i < len(doc_ids) else f"doc_{i}"
+                    error_info = create_error_info(e, text, doc_id, i)
+                    structured_errors.append(error_info)
+                
+                summary = create_batch_summary(0, structured_errors, len(texts))
+                log_batch_results(summary, structured_errors)
+                
+                log.error(f"Unexpected error calling Google embeddings (batch): {e}")
+                error_summary = format_user_friendly_error(summary, structured_errors)
+                return EmbedderOutput(data=[], error=error_summary, raw_response=None)
+            else:
+                log.error(f"Error calling Google embeddings (batch): {e}")
+                return EmbedderOutput(data=[], error=str(e), raw_response=None)
 
     def _ensure_dimension_consistency(self, embeddings: List[List[float]]) -> List[List[float]]:
         """Ensure all embeddings have consistent dimensions."""

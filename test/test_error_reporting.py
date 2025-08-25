@@ -24,7 +24,8 @@ from typing import List, Dict, Any
 import requests.exceptions
 
 from adalflow.core.types import ModelType, Document, Embedding, EmbedderOutput
-from api.google_embedding_client import GoogleEmbeddingClient, EmbeddingGenerationError
+from api.google_embedding_client import GoogleEmbeddingClient
+from api.embedding_errors import EmbeddingGenerationError
 from api.data_pipeline import transform_documents_and_save_to_db, prepare_data_pipeline
 
 
@@ -62,10 +63,12 @@ class TestErrorReporting:
         EXPECTED TO FAIL: Current implementation doesn't identify failing documents.
         """
         # Mock API failure for specific document in batch processing
+        # First response: batch request fails, then individual requests
         responses = [
-            Mock(status_code=400, text='{"error": {"message": "Invalid input"}}'),
-            Mock(status_code=200, json=lambda: {"embedding": {"values": [0.1] * 768}}),
-            Mock(status_code=200, json=lambda: {"embedding": {"values": [0.2] * 768}})
+            Mock(status_code=503, text="Service Unavailable"),  # Batch request fails
+            Mock(status_code=400, text='{"error": {"message": "Invalid input"}}'),  # Individual: doc_0 fails
+            Mock(status_code=200, json=lambda: {"embedding": {"values": [0.1] * 768}}),  # Individual: doc_1 succeeds
+            Mock(status_code=200, json=lambda: {"embedding": {"values": [0.2] * 768}})   # Individual: doc_2 succeeds
         ]
         
         with patch('requests.post', side_effect=responses):
