@@ -3,7 +3,7 @@ name: fix-api-pipeline-errors
 status: in-progress
 created: 2025-08-23T07:59:26Z
 updated: 2025-08-25T18:53:26Z
-progress: 0%
+progress: 9%
 prd: .claude/prds/fix-api-pipeline-errors.md
 github: [Will be updated when synced to GitHub]
 ---
