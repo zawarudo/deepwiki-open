@@ -48,24 +48,6 @@ ruff check api/
 
 ### Build & Test Cycle
 
-#### Initial Setup
-```bash
-# Clone and prepare environment
-git clone https://github.com/AsyncFuncAI/deepwiki-open.git
-cd deepwiki-open
-
-# Create .env file with API keys
-cat > .env << EOF
-GOOGLE_API_KEY=your_google_api_key
-OPENAI_API_KEY=your_openai_api_key
-OPENROUTER_API_KEY=your_openrouter_api_key  # Optional
-OLLAMA_HOST=http://localhost:11434          # Optional
-AZURE_OPENAI_API_KEY=your_azure_key         # Optional
-AZURE_OPENAI_ENDPOINT=your_azure_endpoint   # Optional
-AZURE_OPENAI_VERSION=your_azure_version     # Optional
-EOF
-```
-
 #### TDD Docker Workflow
 
 ```bash
