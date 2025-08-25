@@ -78,6 +78,8 @@ class GoogleEmbeddingClient(ModelClient):
 
     def _validate_embedding(self, embedding: List[float], expected_dim: int = 768) -> bool:
         """Validate embedding has correct dimensions."""
+        if embedding is None:
+            raise ValueError("Null embedding vector")
         if not embedding:
             raise ValueError("Empty embedding vector")
         if len(embedding) != expected_dim:
@@ -124,7 +126,7 @@ class GoogleEmbeddingClient(ModelClient):
                         single_payload = {"model": model, "content": {"parts": [{"text": text}]}}
                         r = requests.post(single_url, json=single_payload, headers=headers, timeout=60)
                         if r.status_code != 200:
-                            # Record error and raise exception instead of creating empty vector
+                            # Record error and skip this document (don't create empty vector)
                             any_errors = True
                             try:
                                 error_msg = r.text[:200]
@@ -132,9 +134,7 @@ class GoogleEmbeddingClient(ModelClient):
                                 error_msg = f"status={r.status_code}"
                             error_messages.append(error_msg)
                             log.error(f"Failed to generate embedding for text at index {start + i}: {error_msg}")
-                            raise EmbeddingGenerationError(
-                                f"Failed to generate embedding after retries: {error_msg}"
-                            )
+                            continue  # Skip this document
                         try:
                             d = r.json()
                             vec = d.get("embedding", {}).get("values", [])
@@ -145,9 +145,7 @@ class GoogleEmbeddingClient(ModelClient):
                             error_msg = str(e)[:200]
                             error_messages.append(error_msg)
                             log.error(f"Failed to parse embedding for text at index {start + i}: {error_msg}")
-                            raise EmbeddingGenerationError(
-                                f"Failed to parse or validate embedding: {error_msg}"
-                            )
+                            continue  # Skip this document
                         embeddings.append(Embedding(embedding=vec, index=start + i))
                 else:
                     d = resp.json()
@@ -161,33 +159,72 @@ class GoogleEmbeddingClient(ModelClient):
                         )
                     for i in range(len(chunk)):
                         if i < len(resp_embs):
-                            vec = resp_embs[i].get("values", [])
+                            embedding_entry = resp_embs[i]
+                            vec = embedding_entry.get("values")
+                            if vec is None:
+                                # Check if it's explicitly None vs missing field
+                                if "values" in embedding_entry and embedding_entry["values"] is None:
+                                    # Explicit None - serious data corruption, always fail
+                                    error_msg = f"Null embedding values at index {start + i}"
+                                    log.error(error_msg)
+                                    raise EmbeddingGenerationError(error_msg)
+                                else:
+                                    # Missing field - malformed but not corrupted, skip in multi-input
+                                    error_msg = f"Missing 'values' field at index {start + i}"
+                                    log.error(error_msg)
+                                    if len(texts) == 1:
+                                        raise EmbeddingGenerationError(error_msg)
+                                    else:
+                                        any_errors = True
+                                        error_messages.append(error_msg)
+                                        continue
                             try:
                                 # Validate embedding dimensions
                                 self._validate_embedding(vec)
-                            except Exception as e:
-                                any_errors = True
+                            except ValueError as e:
+                                # For single input batches, validation failures should fail entirely
+                                # For multi-input batches, skip invalid embeddings (like empty arrays)
                                 error_msg = f"Invalid embedding at index {start + i}: {str(e)}"
+                                log.error(error_msg)
+                                if len(texts) == 1:
+                                    # Single input - fail the entire request
+                                    raise EmbeddingGenerationError(error_msg)
+                                else:
+                                    # Multi-input - skip this embedding
+                                    any_errors = True
+                                    error_messages.append(error_msg)
+                                    continue
+                            except Exception as e:
+                                # Other failures can be skipped
+                                any_errors = True
+                                error_msg = f"Failed to validate embedding at index {start + i}: {str(e)}"
                                 error_messages.append(error_msg)
                                 log.error(error_msg)
-                                raise EmbeddingGenerationError(error_msg)
+                                continue  # Skip this embedding
                         else:
                             # Missing embedding in batch response
+                            any_errors = True
                             error_msg = f"Missing embedding for text at index {start + i} in batch response"
                             error_messages.append(error_msg)
                             log.error(error_msg)
-                            raise EmbeddingGenerationError(error_msg)
+                            continue  # Skip this embedding
                         embeddings.append(Embedding(embedding=vec, index=start + i))
 
             error_summary = None
             if any_errors:
                 # Summarize errors but still return whatever embeddings we obtained
                 unique_msgs = [m for idx, m in enumerate(error_messages) if m not in error_messages[:idx]]
-                error_summary = (
-                    f"One or more embedding requests failed; partial results returned. "
-                    f"Examples: {', '.join(unique_msgs[:3])}"
-                )
+                if len(embeddings) == 0:
+                    error_summary = f"Failed to generate any embeddings. Examples: {', '.join(unique_msgs[:3])}"
+                else:
+                    error_summary = (
+                        f"One or more embedding requests failed; partial results returned. "
+                        f"Examples: {', '.join(unique_msgs[:3])}"
+                    )
             return EmbedderOutput(data=embeddings, error=error_summary, raw_response=None)
+        except EmbeddingGenerationError:
+            # Re-raise embedding generation errors directly
+            raise
         except Exception as e:
             log.error(f"Error calling Google embeddings (batch): {e}")
             return EmbedderOutput(data=[], error=str(e), raw_response=None)
