@@ -54,7 +54,8 @@ check_env() {
     fi
     
     # Check for API keys
-    if grep -q "GOOGLE_API_KEY=" .env && grep -q "OPENAI_API_KEY=" .env; then
+    # if grep -q "GOOGLE_API_KEY=" .env && grep -q "OPENAI_API_KEY=" .env; then
+    if grep -q "GOOGLE_API_KEY=" .env; then
         print_success "API keys found in .env"
     else
         print_warning "API keys may be missing. Tests will run in mock mode."
