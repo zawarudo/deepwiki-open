@@ -278,7 +278,7 @@ def read_all_documents(path: str, is_ollama_embedder: bool = None, excluded_dirs
 
     # Process code files first
     for ext in code_extensions:
-        files = glob.glob(f"{path}/**/*{ext}", recursive=True)
+        files = glob.glob(f"{path}/**{ext}", recursive=True)
         for file_path in files:
             # Check if file should be processed based on inclusion/exclusion rules
             if not should_process_file(file_path, use_inclusion_mode, included_dirs, included_files, excluded_dirs, excluded_files):
@@ -319,7 +319,7 @@ def read_all_documents(path: str, is_ollama_embedder: bool = None, excluded_dirs
 
     # Then process documentation files
     for ext in doc_extensions:
-        files = glob.glob(f"{path}/**/*{ext}", recursive=True)
+        files = glob.glob(f"{path}/**{ext}", recursive=True)
         for file_path in files:
             # Check if file should be processed based on inclusion/exclusion rules
             if not should_process_file(file_path, use_inclusion_mode, included_dirs, included_files, excluded_dirs, excluded_files):
