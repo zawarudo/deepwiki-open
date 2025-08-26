@@ -1,491 +1,308 @@
-# Consolidated Edge Cases: RAG Fail-Fast Unpack Error Epic
+# Edge Cases: RAG Tuple-Unpack Error Fix
 
 ## Overview
-This document consolidates all edge cases identified across the 6 parallel tasks for fixing RAG tuple unpacking errors. Each edge case includes detection criteria, impact assessment, and mitigation strategies.
+Focused edge cases for the simplified 5-6 hour implementation plan. Only includes critical cases that must be handled to prevent tuple-unpack errors and ensure basic functionality.
 
-## Critical Edge Cases (System Failure Risk)
+## Priority 0: Must Fix (Causes Tuple-Unpack Errors)
 
-### 1. Null/None Query Input
-**Source Tasks**: 001, 002, 003
-**Scenario**: User passes None or empty string as query
-**Current Behavior**: Unpredictable - may crash embedder or return empty
-**Impact**: System crash, undefined behavior
-**Detection**:
+### 1. RAG Returns Non-Tuple Types
+**Impact**: Direct tuple-unpack failure
+**Current Behavior**: 
 ```python
-if query is None or query.strip() == "":
-    # Handle edge case
-```
-**Mitigation**: 
-- Return `(None, [])` immediately
-- Log warning for monitoring
-- Document behavior in API
+# These all cause "not enough values to unpack" error:
+result = rag.call(query)  # Returns list: ["doc1", "doc2"]
+answer, docs = result  # FAILS!
 
-### 2. Embedder Dimension Mismatch
-**Source Tasks**: 001, 004
-**Scenario**: Embedder returns vectors of different dimensions than FAISS index expects
-**Current Behavior**: FAISS throws runtime error
-**Impact**: Complete retrieval failure
-**Example**:
-```python
-# OpenAI returns 1536 dimensions
-# Google returns 768 dimensions
-# Switching providers without re-indexing fails
-```
-**Detection**:
-```python
-expected_dim = retriever.index.d
-actual_dim = len(embedding_vector)
-if expected_dim != actual_dim:
-    raise DimensionMismatchError(f"Expected {expected_dim}, got {actual_dim}")
-```
-**Mitigation**:
-- Validate dimensions before retrieval
-- Store dimension metadata with index
-- Automatic re-embedding if mismatch detected
+result = rag.call(query)  # Returns None
+answer, docs = result  # FAILS!
 
-### 3. Retriever Returns Non-List Types
-**Source Tasks**: 002, 003
-**Scenario**: Custom retriever implementations return dict, generator, or None
-**Current Behavior**: Tuple unpacking fails downstream
-**Impact**: Runtime errors in consumers
+result = rag.call(query)  # Returns single string: "answer"
+answer, docs = result  # FAILS!
+```
+**Fix with Normalizer**:
+```python
+from api.utils import normalize_rag_result
+
+result = rag.call(query)  # Could be anything
+answer, docs = normalize_rag_result(result)  # Always works
+```
+**Test Coverage**: `test/test_normalizer.py`
+
+### 2. Embedder Returns Non-Tuple for FAISS
+**Impact**: FAISSRetriever expects tuple, crashes on unpack
+**Current Behavior**:
+```python
+# FAISSRetriever expects: embedding, metadata = embedder(text)
+# But providers return:
+embedder("text")  # OpenAI: {"data": [{"embedding": [...]}]}
+embedder("text")  # Gemini: np.array([...])
+embedder("text")  # Ollama: {"embedding": [...]}
+embedder("text")  # OpenRouter: [...] (direct list)
+```
+**Fix with Wrapper**:
+```python
+from api.embeddings import wrap_embedder
+
+wrapped = wrap_embedder(raw_embedder)
+embedding, metadata = wrapped("text")  # Always returns tuple
+```
+**Test Coverage**: `test/test_embedder_wrapper.py`
+
+### 3. Empty/None Query Input
+**Impact**: Undefined behavior, potential crashes
+**Current Behavior**: May crash embedder or return unexpected types
+**Fix in RAG.call() and __call__()**:
+```python
+def call(self, query: str, language: str = "en"):
+    if not query or not query.strip():
+        logger.warning("Empty query received")
+        return (None, [])
+    # ... rest of implementation
+
+def __call__(self, query: str, language: str = "en"):
+    """Syntactic sugar for rag(query) usage"""
+    return self.call(query, language)
+```
+**Test Coverage**: `test/test_rag_tuple_return.py`
+
+## Priority 1: Common Scenarios (Must Handle Gracefully)
+
+### 4. No Documents Retrieved
+**Impact**: Must return consistent tuple format
+**Scenario**: Query doesn't match any documents
+**Required Behavior**:
+```python
+answer, docs = rag.call("query with no matches")
+assert answer is None
+assert docs == []
+assert isinstance(docs, list)
+```
+**Test Coverage**: `test/test_integration.py`
+
+### 5. API/Network Errors
+**Impact**: Must return tuple even on failure
+**Scenarios**:
+- Provider API down
+- Network timeout
+- Rate limit exceeded
+**Required Behavior**:
+```python
+# Even with errors, always return tuple
+try:
+    answer, docs = rag.call(query)
+except:
+    # Should not happen - errors handled internally
+    pass
+
+# After fix:
+answer, docs = rag.call(query)  # Returns (None, []) on error
+```
+**Test Coverage**: `test/test_rag_tuple_return.py`
+
+### 6. Provider Response Format Variations
+**Impact**: Different providers return different formats
 **Examples**:
 ```python
-# Generator return (lazy evaluation)
-return (doc for doc in documents)
+# OpenAI
+{"data": [{"embedding": [0.1, 0.2, ...]}]}
 
-# Dict return (with metadata)
-return {"documents": [...], "scores": [...]}
+# Gemini  
+np.array([0.1, 0.2, ...])
 
-# None return (no results)
-return None
+# Ollama
+{"embedding": [0.1, 0.2, ...]}
+
+# OpenRouter
+[0.1, 0.2, ...]  # Direct list
 ```
-**Mitigation**:
-- Type check and conversion in RAG.call()
-- Standardize retriever interface
-- Add return type validation
+**Fix**: Embedder wrapper handles all formats
+**Test Coverage**: `test/test_embedder_wrapper.py`
 
-## Provider-Specific Edge Cases
+## Priority 2: Edge Cases to Document (Not Fix)
 
-### 4. OpenAI Rate Limit Exhaustion
-**Source Tasks**: 002, 005
-**Scenario**: API rate limits hit during embedding or generation
-**Current Behavior**: Exception raised, no graceful degradation
-**Impact**: Complete feature unavailability
-**Detection**:
+### 7. Concurrent Access
+**Current Risk**: Potential race conditions
+**Mitigation**: Document as known limitation
+**Workaround**: Use single-threaded access or external locking
+
+### 8. Large Result Sets
+**Current Risk**: Slow processing with 100+ documents
+**Mitigation**: Document recommended limits
+**Workaround**: Limit retriever k parameter
+
+### 9. Provider Switching
+**Current Risk**: Dimension mismatch if index not rebuilt
+**Mitigation**: Document requirement to reindex
+**Workaround**: Check dimensions, warn if mismatch
+
+## Test-Driven Development Coverage
+
+### Phase 0 Tests (Normalizer)
 ```python
-try:
-    response = openai_client.embeddings.create(...)
-except RateLimitError as e:
-    # Handle rate limit
+# test/test_normalizer.py
+def test_normalizer_handles_tuple():
+    assert normalize_rag_result(("ans", [])) == ("ans", [])
+
+def test_normalizer_handles_list():
+    assert normalize_rag_result(["doc"]) == (None, ["doc"])
+
+def test_normalizer_handles_none():
+    assert normalize_rag_result(None) == (None, [])
+
+def test_normalizer_handles_string():
+    assert normalize_rag_result("answer") == ("answer", [])
 ```
-**Mitigation**:
-- Exponential backoff retry
-- Fallback to cached embeddings
-- Queue requests for later processing
 
-### 5. Google Gemini Multimodal Input
-**Source Tasks**: 001, 006
-**Scenario**: User passes image + text, but retriever expects text only
-**Current Behavior**: Embedding fails or uses only text portion
-**Impact**: Degraded retrieval quality
-**Example**:
+### Phase 1 Tests (Core Fixes)
 ```python
-query = {
-    "text": "What is in this diagram?",
-    "image": base64_encoded_image
+# test/test_rag_tuple_return.py
+def test_rag_always_returns_tuple():
+    # Test success, empty, error cases
+
+def test_rag_callable_syntax():
+    # Test __call__ method works as syntactic sugar
+    rag = RAG()
+    result1 = rag.call("test")
+    result2 = rag("test")  # Should work the same
+    assert isinstance(result1, tuple) and isinstance(result2, tuple)
+    
+# test/test_embedder_wrapper.py
+def test_wrapper_handles_all_providers():
+    # Test OpenAI, Gemini, Ollama, OpenRouter formats
+```
+
+### Phase 3 Tests (Integration)
+```python
+# test/test_integration.py
+def test_end_to_end_with_normalizer():
+    # Full pipeline with various return formats
+    
+def test_wrapped_embedder_with_faiss():
+    # FAISS retriever with wrapped embedder
+
+# test/test_performance.py
+def test_overhead_under_50_percent():
+    # Timing harness to verify performance constraint
+    import time
+    baseline_start = time.time()
+    # Run without normalizer/wrapper
+    baseline_time = time.time() - baseline_start
+    
+    wrapped_start = time.time()
+    # Run with normalizer/wrapper
+    wrapped_time = time.time() - wrapped_start
+    
+    overhead = (wrapped_time - baseline_time) / baseline_time
+    assert overhead < 0.5, f"Overhead {overhead:.1%} exceeds 50%"
+```
+
+## Logging for Edge Case Detection
+
+### JSON Log Format for Debugging
+```json
+{
+    "event": "rag_call",
+    "provider": "openai",
+    "query_length": 45,
+    "status": "success|no_docs|error",
+    "doc_count": 3,
+    "error_type": "ValueError",
+    "has_answer": true
 }
 ```
-**Mitigation**:
-- Detect multimodal input
-- Use appropriate embedder
-- Document multimodal support matrix
 
-### 6. Ollama Connection Timeout
-**Source Tasks**: 001, 004, 005
-**Scenario**: Local Ollama server not responding
-**Current Behavior**: Long timeout, then connection error
-**Impact**: UI freezes, poor user experience
-**Detection**:
-```python
-import requests
-try:
-    response = requests.get("http://localhost:11434/api/tags", timeout=1)
-except requests.exceptions.Timeout:
-    # Ollama not responding
+**Log Output Path**: `/tmp/rag_test.log`
+
+### Log Analysis Commands
+```bash
+# Check for tuple-unpack errors
+grep -i "tuple\|unpack" /tmp/rag_test.log
+
+# Count different error types
+grep '"status":"error"' /tmp/rag_test.log | jq -r .error_type | sort | uniq -c
+
+# Find empty retrieval cases
+grep '"status":"no_docs"' /tmp/rag_test.log | wc -l
 ```
-**Mitigation**:
-- Short timeout (1-2 seconds)
-- Async health checks
-- Automatic fallback to cloud provider
-
-### 7. Azure OpenAI Endpoint Version Mismatch
-**Source Tasks**: 001, 006
-**Scenario**: API version in config doesn't match endpoint capabilities
-**Current Behavior**: Cryptic error messages
-**Impact**: Integration appears broken
-**Example**:
-```python
-# Endpoint supports: "2023-05-15"
-# Config specifies: "2024-02-01"
-# Result: 404 or feature not available
-```
-**Mitigation**:
-- Version negotiation on init
-- Clear error messages
-- Compatibility matrix in docs
-
-### 8. OpenRouter Model Availability
-**Source Tasks**: 002, 005
-**Scenario**: Requested model temporarily unavailable
-**Current Behavior**: Generic error, no fallback
-**Impact**: Feature unavailable
-**Detection**:
-```python
-if "model_not_available" in error_response:
-    # Try alternative model
-```
-**Mitigation**:
-- Model fallback chain
-- Real-time availability check
-- User notification of model switch
-
-## Data Edge Cases
-
-### 9. Empty Document Corpus
-**Source Tasks**: 002, 003, 004
-**Scenario**: No documents indexed in FAISS
-**Current Behavior**: Retriever returns empty list, generator has no context
-**Impact**: Always returns `(None, [])`
-**Detection**:
-```python
-if retriever.index.ntotal == 0:
-    logger.warning("No documents in index")
-    return (None, [])
-```
-**Mitigation**:
-- Check corpus size on init
-- Provide helpful error message
-- Suggest indexing documents first
-
-### 10. Oversized Query (> Token Limit)
-**Source Tasks**: 001, 002
-**Scenario**: Query exceeds model's context window
-**Current Behavior**: API error or truncation
-**Impact**: Incomplete or failed processing
-**Example**:
-```python
-# GPT-3.5: 4096 tokens
-# User passes: 5000 token query
-```
-**Mitigation**:
-- Query truncation with warning
-- Query summarization
-- Chunking for long queries
-
-### 11. Special Characters in Query
-**Source Tasks**: 001, 003
-**Scenario**: Query contains emojis, RTL text, or control characters
-**Current Behavior**: Inconsistent handling across providers
-**Impact**: Retrieval quality degradation
-**Examples**:
-```python
-query = "What is 🚀 deployment?"  # Emoji
-query = "מה זה תכנות?"  # Hebrew (RTL)
-query = "Hello\x00World"  # Null byte
-```
-**Mitigation**:
-- Unicode normalization
-- Character filtering
-- Provider-specific encoding
-
-### 12. Circular Document References
-**Source Tasks**: 004
-**Scenario**: Retrieved documents reference each other infinitely
-**Current Behavior**: Potential infinite loop in processing
-**Impact**: Memory exhaustion, hung process
-**Example**:
-```python
-doc1.metadata["related"] = doc2.id
-doc2.metadata["related"] = doc1.id
-# Processing related docs loops forever
-```
-**Mitigation**:
-- Visited set tracking
-- Maximum depth limit
-- Cycle detection algorithm
-
-## Concurrent Access Edge Cases
-
-### 13. Race Condition in Index Updates
-**Source Tasks**: 002, 004
-**Scenario**: Multiple threads updating FAISS index simultaneously
-**Current Behavior**: Index corruption or crashes
-**Impact**: Data loss, retrieval failures
-**Detection**:
-```python
-import threading
-index_lock = threading.Lock()
-
-with index_lock:
-    # Safe index update
-    retriever.add_documents(new_docs)
-```
-**Mitigation**:
-- Thread-safe wrapper
-- Read-write locks
-- Atomic index swapping
-
-### 14. Memory Pressure During Embedding
-**Source Tasks**: 001, 005
-**Scenario**: Large batch embedding causes OOM
-**Current Behavior**: Process killed by OS
-**Impact**: Service unavailability
-**Example**:
-```python
-# Embedding 10,000 documents at once
-embeddings = embedder.embed_batch(huge_document_list)
-# OOM if each embedding is 1536 floats
-```
-**Mitigation**:
-- Batch size limits
-- Streaming processing
-- Memory monitoring
-
-### 15. Stale Cache After Provider Switch
-**Source Tasks**: 003, 005
-**Scenario**: Switch provider but cache contains old provider's format
-**Current Behavior**: Type mismatches, parsing errors
-**Impact**: Incorrect results or crashes
-**Detection**:
-```python
-cache_key = f"{provider}:{model}:{query_hash}"
-if cache_provider != current_provider:
-    invalidate_cache()
-```
-**Mitigation**:
-- Provider-aware cache keys
-- Cache versioning
-- Automatic invalidation
-
-## Error Handling Edge Cases
-
-### 16. Partial Retrieval Success
-**Source Tasks**: 002, 003, 004
-**Scenario**: Some documents retrieved, but others fail
-**Current Behavior**: Varies - might return partial or fail entirely
-**Impact**: Inconsistent behavior
-**Example**:
-```python
-# 5 documents match query
-# 3 retrieve successfully
-# 2 fail due to corruption
-```
-**Mitigation**:
-- Return successful subset
-- Log failures for debugging
-- Include partial flag in response
-
-### 17. Generator Timeout Mid-Response
-**Source Tasks**: 002, 005
-**Scenario**: LLM times out while generating answer
-**Current Behavior**: Partial response or exception
-**Impact**: Incomplete answers
-**Detection**:
-```python
-import signal
-
-def timeout_handler(signum, frame):
-    raise TimeoutError("Generation timeout")
-
-signal.signal(signal.SIGALRM, timeout_handler)
-signal.alarm(30)  # 30 second timeout
-```
-**Mitigation**:
-- Return partial answer with flag
-- Implement streaming responses
-- Adjust timeout based on query complexity
-
-### 18. Embedding Service SSL Certificate Issues
-**Source Tasks**: 001, 005
-**Scenario**: SSL verification fails for API calls
-**Current Behavior**: Connection refused
-**Impact**: Complete feature failure
-**Example**:
-```python
-# Corporate proxy with self-signed cert
-ssl.SSLError: [SSL: CERTIFICATE_VERIFY_FAILED]
-```
-**Mitigation**:
-- Certificate pinning
-- Optional SSL verification (with warning)
-- Proxy configuration support
-
-## Testing Edge Cases
-
-### 19. Mock vs Real Provider Behavior Differences
-**Source Tasks**: 004, 006
-**Scenario**: Tests pass with mocks but fail with real providers
-**Current Behavior**: False confidence in test coverage
-**Impact**: Production failures despite passing tests
-**Example**:
-```python
-# Mock returns clean tuple
-mock_rag.return_value = ("answer", [doc1, doc2])
-
-# Real provider might return
-real_rag.return_value = ("answer", [doc1, doc2, None, doc3])
-# Note the None in the list
-```
-**Mitigation**:
-- Integration tests with real providers
-- Contract testing
-- Behavior recording and replay
-
-### 20. Floating Point Precision in Embeddings
-**Source Tasks**: 001, 004
-**Scenario**: Embedding vectors have different precision across providers
-**Current Behavior**: Similarity scores slightly different
-**Impact**: Non-deterministic retrieval
-**Example**:
-```python
-# OpenAI: float32
-# Google: float64
-# Comparison yields different results
-```
-**Mitigation**:
-- Normalize to consistent precision
-- Use epsilon for comparisons
-- Document precision requirements
-
-## Performance Edge Cases
-
-### 21. Quadratic Complexity with Large Result Sets
-**Source Tasks**: 002, 003
-**Scenario**: Retrieved 1000+ documents, processing becomes slow
-**Current Behavior**: UI timeout, perceived hang
-**Impact**: Poor user experience
-**Detection**:
-```python
-if len(retrieved_docs) > 100:
-    logger.warning(f"Large result set: {len(retrieved_docs)} documents")
-```
-**Mitigation**:
-- Result set size limits
-- Pagination support
-- Progressive rendering
-
-### 22. Cache Avalanche on Deployment
-**Source Tasks**: 005
-**Scenario**: All caches expire simultaneously after deployment
-**Current Behavior**: Thundering herd to embedding service
-**Impact**: Service overload, timeouts
-**Mitigation**:
-- Staggered cache expiration
-- Cache warming on deployment
-- Circuit breaker pattern
-
-## Migration Edge Cases
-
-### 23. Mixed Version Deployment
-**Source Tasks**: 003, 006
-**Scenario**: Some services updated, others still on old version
-**Current Behavior**: Incompatible return types
-**Impact**: Partial system failure
-**Example**:
-```python
-# Service A: Returns tuple (new)
-# Service B: Expects list (old)
-# Integration fails
-```
-**Mitigation**:
-- Version detection
-- Compatibility adapters
-- Phased rollout plan
-
-### 24. Legacy Data in Persistent Storage
-**Source Tasks**: 003, 004
-**Scenario**: Old format data in database/cache
-**Current Behavior**: Parsing errors on read
-**Impact**: Historical data inaccessible
-**Mitigation**:
-- Data migration scripts
-- Lazy migration on access
-- Format version tracking
-
-## Monitoring Edge Cases
-
-### 25. Log Volume Explosion
-**Source Tasks**: 005
-**Scenario**: Debug logging left on in production
-**Current Behavior**: Disk full, log system overwhelmed
-**Impact**: Service failure, no logs available
-**Example**:
-```python
-# Every embedding logged (1536 floats)
-# 1000 requests/sec = massive log volume
-```
-**Mitigation**:
-- Log sampling
-- Adaptive log levels
-- Separate debug log stream
-
-### 26. Metrics Cardinality Explosion
-**Source Tasks**: 005
-**Scenario**: Unique label values for each query
-**Current Behavior**: Metrics storage overwhelmed
-**Impact**: Monitoring system failure
-**Example**:
-```python
-# Bad: metric{query="unique text for each request"}
-# Good: metric{status="success", provider="openai"}
-```
-**Mitigation**:
-- Label value limits
-- Aggregation before storage
-- Cardinality monitoring
-
-## Summary Statistics
-
-- **Total Edge Cases Identified**: 26
-- **Critical Severity**: 8
-- **High Severity**: 10
-- **Medium Severity**: 8
-- **By Category**:
-  - Provider-Specific: 5
-  - Data-Related: 6
-  - Concurrency: 3
-  - Error Handling: 3
-  - Performance: 2
-  - Testing: 2
-  - Migration: 2
-  - Monitoring: 2
-  - System-Level: 1
-
-## Mitigation Priority Matrix
-
-| Priority | Edge Cases | Effort | Impact |
-|----------|------------|--------|--------|
-| P0 (Immediate) | 1, 2, 3, 9 | Low | Critical |
-| P1 (This Sprint) | 4, 5, 6, 13, 16 | Medium | High |
-| P2 (Next Sprint) | 7, 8, 10, 11, 14 | Medium | Medium |
-| P3 (Backlog) | 12, 15, 17-26 | High | Low-Medium |
-
-## Test Coverage Requirements
-
-Each edge case requires:
-1. **Unit Test**: Isolated component behavior
-2. **Integration Test**: Full flow validation
-3. **Regression Test**: Ensures fix doesn't break
-4. **Performance Test**: No degradation under load
-5. **Documentation**: User-visible behavior documented
 
 ## Implementation Checklist
 
-- [ ] Review all edge cases with team
-- [ ] Prioritize based on user impact
-- [ ] Create test cases for each edge case
-- [ ] Implement mitigations in priority order
-- [ ] Document behavior in API reference
-- [ ] Add monitoring for edge case occurrence
-- [ ] Create runbook for operations team
-- [ ] Schedule review after 30 days in production
+### Must Handle (In Scope - 5-6 hours)
+- [ ] Non-tuple returns from RAG → normalizer helper
+- [ ] Non-tuple returns from embedder → wrapper function
+- [ ] Empty/None queries → early return
+- [ ] No documents case → return (None, [])
+- [ ] API errors → return (None, [])
+- [ ] Provider variations → wrapper handles all
+- [ ] Add `__call__` method for syntactic sugar
+- [ ] Performance overhead < 50% (verified by timing harness)
+
+### Document Only (Out of Scope - Phase 4)
+- [ ] Concurrent access issues → README note (Task 006)
+- [ ] Large result sets → Document limits (Task 006)
+- [ ] Provider switching → Reindex requirement (Task 006)
+- [ ] Memory issues → Monitor externally (Task 006)
+- [ ] SSL/Proxy issues → Operations runbook (Task 006)
+
+## Quick Validation Script
+```bash
+#!/bin/bash
+# Save as /tmp/quick_validation.sh
+# Run after implementation to verify edge cases handled
+
+echo "=== Edge Case Validation ==="
+
+# Test normalizer with various inputs
+python3 -c "
+from api.utils import normalize_rag_result
+test_cases = [
+    (['doc'], 'List input'),
+    (('ans', []), 'Tuple input'),
+    (None, 'None input'),
+    ('string', 'String input'),
+]
+for input_val, desc in test_cases:
+    result = normalize_rag_result(input_val)
+    assert isinstance(result, tuple) and len(result) == 2
+    print(f'✓ {desc}: {result}')
+"
+
+# Test embedder wrapper with provider formats
+python3 -c "
+from api.embeddings import wrap_embedder
+import numpy as np
+
+def test_openai():
+    return {'data': [{'embedding': [0.1] * 10}]}
+
+def test_gemini():
+    return np.random.rand(10)
+
+def test_list():
+    return [0.1] * 10
+
+for name, embedder in [('OpenAI', test_openai), ('Gemini', test_gemini), ('List', test_list)]:
+    wrapped = wrap_embedder(embedder)
+    result = wrapped('test')
+    assert isinstance(result, tuple) and len(result) == 2
+    print(f'✓ {name} format handled')
+"
+
+echo "=== All edge cases validated ==="
+```
+
+## Summary
+
+**Critical Edge Cases**: 6 identified, all addressed by implementation
+**Test Coverage**: 100% of critical paths with specific test file mapping:
+- Normalizer edge cases → `test/test_normalizer.py`
+- RAG contract edge cases → `test/test_rag_tuple_return.py`
+- Embedder edge cases → `test/test_embedder_wrapper.py`
+- Integration edge cases → `test/test_integration.py`
+- Performance validation → `test/test_performance.py`
+
+**Time to Fix**: 5-6 hours total
+**Risk Level**: Low (defensive normalizer prevents crashes)
+**Log Output**: `/tmp/rag_test.log` (JSON-structured)
+
+Focus: Fix tuple-unpack errors, ensure basic functionality, document the rest.
