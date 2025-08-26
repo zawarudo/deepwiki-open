@@ -2,10 +2,10 @@
 name: fix-rag-fail-fast-unpack-error
 status: in_progress
 created: 2025-08-25T19:11:34Z
-updated: 2025-08-26T12:00:00Z
+updated: 2025-08-26T13:27:00Z
 progress: 0%
 prd: .claude/prds/fix-rag-fail-fast-unpack-error.md
-github: [Will be updated when synced to GitHub]
+github: https://github.com/zawarudo/deepwiki-open/issues/1
 ---
 
 # Epic: fix-rag-fail-fast-unpack-error
@@ -123,34 +123,15 @@ pytest test/test_normalizer.py -v  # Should pass
 ```
 
 ## Tasks Created
-- [ ] 001.md - Add query-embedder adapter for FAISSRetriever expectations (Phase 1.2)
-- [ ] 002.md - Standardize RAG.call() to always return (answer_or_none, docs) (Phase 1.1)
-  - Include `__call__` method for syntactic sugar
-  - Handle empty/None queries with early return
-  - Catch all exceptions and return (None, [])
-- [ ] 003.md - Implement normalize_rag_result() and update consumers (Phase 0)
-- [ ] 004.md - Add tests for retrieval success/empty/partial-failure paths (Phase 3)
-  - Include performance timing harness for < 50% overhead
-- [ ] 005.md - Add structured logs/metrics for return shapes (Phase 2)
-  - Output to `/tmp/rag_test.log`
-  - Include provider, query_length, status, doc_count, error_type, has_answer
-- [ ] 006.md - Update README and internal docs for standardized contracts (Phase 4)
-  - Document concurrent access limitations
-  - Document large result set performance considerations
-  - Document provider switching dimension mismatch risks
-  - Add memory monitoring guidance
-  - Add SSL/proxy troubleshooting
-
-**Execution Order (from RESEQUENCED_PLAN):**
-1. Task 003 (Phase 0) - Defensive normalizer first → `test/test_normalizer.py`
-2. Tasks 002 & 001 (Phase 1) - Core fixes (can run parallel)
-   - Task 002: `test/test_rag_tuple_return.py`
-   - Task 001: `test/test_embedder_wrapper.py`
-3. Task 005 (Phase 2) - Logging → output to `/tmp/rag_test.log`
-4. Task 004 (Phase 3) - Testing → `test/test_integration.py` + `test/test_performance.py`
-5. Task 006 (Phase 4) - Documentation → README + HANDOFF.md
+- [ ] #2 - Add query-embedder adapter for FAISSRetriever expectations (parallel: true)
+- [ ] #3 - Standardize RAG.call() to always return (answer_or_none, docs) (parallel: true)
+- [ ] #4 - Implement normalize_rag_result() and update consumers (parallel: false)
+- [ ] #5 - Add tests for retrieval success/empty/partial-failure paths (parallel: true)
+- [ ] #6 - Add structured logs/metrics for return shapes (parallel: true)
+- [ ] #7 - Update README and internal docs for standardized contracts (parallel: false)
 
 Total tasks: 6
-Revised effort: 5-6 hours (down from 27 hours)
-Approach: TDD with defensive programming
+Parallel tasks: 4
+Sequential tasks: 2
+Estimated total effort: 5-6 hours
 
